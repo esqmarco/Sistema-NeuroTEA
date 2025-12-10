@@ -1503,7 +1503,11 @@ function openEditGroupModal(groupId) {
     currentEditingGroupId = groupId;
     const group = groupTherapy[groupId];
 
-    document.getElementById('edit-group-title').textContent = `Editar ${group.name}`;
+    // Prellenar campos con datos actuales del grupo
+    document.getElementById('edit-group-id').value = groupId;
+    document.getElementById('edit-group-name').value = group.name;
+    document.getElementById('edit-group-percentage').value = group.neuroteaPercentage || 30;
+    document.getElementById('edit-group-title').textContent = group.name;
 
     renderEditGroupChildrenList();
 

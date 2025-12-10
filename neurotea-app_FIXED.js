@@ -5556,15 +5556,16 @@ function validatePaymentMode() {
 
 /**
  * Elimina un paquete individual por su ID
- * CORREGIDO: Ahora también elimina los créditos asociados de patientCredits
+ * CORREGIDO: Ahora elimina correctamente de memoria Y de IndexedDB
  * @param {string} packageId - ID del paquete a eliminar
  */
 async function eliminarPaqueteIndividual(packageId) {
     try {
         console.log('🗑️ Eliminando paquete:', packageId);
 
-        // Buscar y eliminar el paquete de dailyPackagePurchases
+        // Buscar el paquete y guardar su fecha ANTES de eliminarlo
         let paqueteEliminado = null;
+        let fechaDelPaquete = null;
 
         for (const fecha in dailyPackagePurchases) {
             const paquetes = dailyPackagePurchases[fecha];
@@ -5572,6 +5573,7 @@ async function eliminarPaqueteIndividual(packageId) {
 
             if (index !== -1) {
                 paqueteEliminado = paquetes[index];
+                fechaDelPaquete = fecha;
                 paquetes.splice(index, 1);
 
                 // Si no quedan paquetes en esa fecha, eliminar la entrada
@@ -5590,8 +5592,10 @@ async function eliminarPaqueteIndividual(packageId) {
 
         console.log('✅ Paquete eliminado de memoria:', paqueteEliminado);
 
-        // CORRECCIÓN: Eliminar también los créditos asociados de patientCredits
+        // PASO 1: Eliminar créditos de patientCredits en memoria
         const { patientName, therapist } = paqueteEliminado;
+        let creditIdToDelete = null;
+
         if (patientCredits[patientName] && patientCredits[patientName][therapist]) {
             const credits = patientCredits[patientName][therapist];
 
@@ -5599,8 +5603,9 @@ async function eliminarPaqueteIndividual(packageId) {
                 // Múltiples paquetes - buscar y eliminar el que coincida con packageId
                 const creditIndex = credits.findIndex(c => c.packageId === packageId);
                 if (creditIndex !== -1) {
+                    creditIdToDelete = `${patientName}_${therapist}_${creditIndex}`;
                     credits.splice(creditIndex, 1);
-                    console.log(`✅ Créditos eliminados de patientCredits (array) para packageId: ${packageId}`);
+                    console.log(`✅ Créditos eliminados de memoria (array) para packageId: ${packageId}`);
 
                     // Si no quedan créditos, limpiar la entrada
                     if (credits.length === 0) {
@@ -5610,33 +5615,71 @@ async function eliminarPaqueteIndividual(packageId) {
             } else {
                 // Paquete único - verificar si coincide el packageId
                 if (credits.packageId === packageId) {
+                    creditIdToDelete = `${patientName}_${therapist}_0`;
                     delete patientCredits[patientName][therapist];
-                    console.log(`✅ Créditos eliminados de patientCredits (único) para packageId: ${packageId}`);
+                    console.log(`✅ Créditos eliminados de memoria (único) para packageId: ${packageId}`);
                 }
             }
 
             // Si no quedan terapeutas para este paciente, limpiar la entrada del paciente
-            if (Object.keys(patientCredits[patientName]).length === 0) {
+            if (patientCredits[patientName] && Object.keys(patientCredits[patientName]).length === 0) {
                 delete patientCredits[patientName];
                 console.log(`✅ Entrada de paciente eliminada: ${patientName}`);
             }
         }
 
-        // CORRECCIÓN QUIRÚRGICA: Eliminar también del IndexedDB
+        // PASO 2: Eliminar de IndexedDB - dailyPackagePurchases
+        // Limpiar todos los paquetes de esa fecha y volver a guardar los restantes
         try {
-            await deleteFromIndexedDB('dailyPackagePurchases', packageId);
-            console.log('✅ Paquete eliminado del IndexedDB:', packageId);
+            await clearPackagesByDate(fechaDelPaquete);
+            console.log(`✅ Paquetes de fecha ${fechaDelPaquete} limpiados de IndexedDB`);
+
+            // Si aún quedan paquetes en esa fecha, guardarlos de nuevo
+            if (dailyPackagePurchases[fechaDelPaquete] && dailyPackagePurchases[fechaDelPaquete].length > 0) {
+                const packagesData = dailyPackagePurchases[fechaDelPaquete].map(pkg => ({
+                    ...pkg,
+                    fecha: fechaDelPaquete
+                }));
+                await saveToIndexedDB('dailyPackagePurchases', packagesData);
+                console.log(`✅ Paquetes restantes de ${fechaDelPaquete} guardados en IndexedDB`);
+            }
         } catch (dbError) {
-            console.error('Error al eliminar del IndexedDB:', dbError);
-            // Continuar con el proceso aunque falle el IndexedDB
+            console.error('Error al eliminar paquete del IndexedDB:', dbError);
+        }
+
+        // PASO 3: Eliminar crédito de IndexedDB - patientCredits
+        // Limpiar y volver a guardar toda la estructura de patientCredits
+        try {
+            // Obtener todos los créditos actuales de IndexedDB
+            const existingCredits = await loadFromIndexedDB('patientCredits');
+
+            // Filtrar para eliminar el crédito del paquete eliminado
+            const filteredCredits = existingCredits.filter(credit => {
+                return credit.packageId !== packageId;
+            });
+
+            // Limpiar y guardar los créditos filtrados
+            if (db) {
+                const transaction = db.transaction(['patientCredits'], 'readwrite');
+                const store = transaction.objectStore('patientCredits');
+                await new Promise((resolve, reject) => {
+                    const clearRequest = store.clear();
+                    clearRequest.onsuccess = () => resolve();
+                    clearRequest.onerror = () => reject(clearRequest.error);
+                });
+
+                if (filteredCredits.length > 0) {
+                    await saveToIndexedDB('patientCredits', filteredCredits);
+                }
+                console.log(`✅ Créditos actualizados en IndexedDB (${filteredCredits.length} restantes)`);
+            }
+        } catch (dbError) {
+            console.error('Error al eliminar créditos del IndexedDB:', dbError);
         }
 
         // Actualizar las vistas
         updateActivePackagesList();
         updateAllViews(fechaActual);
-
-        // Guardar cambios (incluye patientCredits)
-        saveToStorage();
 
         // Mostrar mensaje de éxito
         showNotification(`Paquete eliminado: ${paqueteEliminado.patientName}`, 'success');

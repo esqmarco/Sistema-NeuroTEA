@@ -1292,15 +1292,18 @@ function registerCreditSession() {
     // Agregar sesión (NO actualizar saldos reales porque es $0)
     if (!sessions[fecha]) sessions[fecha] = [];
     sessions[fecha].push(session);
-    
+
     // CORRECCIÓN: Actualizar vistas ANTES de limpiar formulario
     updateAllViews(fecha);
-    
+
+    // CORRECCIÓN: Actualizar lista de paquetes activos (para reflejar créditos usados)
+    updateActivePackagesList();
+
     // Limpiar formulario después de actualizar vistas
     clearSessionForm();
-    
+
     saveToStorageAsync();
-    
+
     // Mensaje de confirmación específico para créditos
     const remainingCredits = creditResult.remainingInPackage !== undefined ? creditResult.remainingInPackage : 0;
     alert(`✅ Sesión registrada usando crédito.\nPaciente: ${patientName}\nTerapeuta: ${therapist}\nCréditos restantes: ${remainingCredits}`);
@@ -4560,42 +4563,95 @@ function populatePackageTherapistSelect() {
 
 /**
  * Actualiza la lista de paquetes activos
+ * CORREGIDO: Ahora muestra TODOS los paquetes con créditos disponibles,
+ * independientemente de la fecha de compra
  */
 function updateActivePackagesList() {
     const container = document.getElementById('active-packages-container');
     const counter = document.getElementById('active-packages-counter');
-    
+
     if (!container || !counter) return;
-    
-    // Obtener paquetes del día actual
-    const todayPackages = dailyPackagePurchases[fechaActual] || [];
-    
-    if (todayPackages.length === 0) {
+
+    // CORRECCIÓN: Obtener paquetes de TODAS las fechas, no solo de hoy
+    const allActivePackages = [];
+    const packagesToRemove = []; // Paquetes sin créditos para eliminar
+
+    // Iterar sobre todas las fechas en dailyPackagePurchases
+    Object.keys(dailyPackagePurchases).forEach(fecha => {
+        const packagesForDate = dailyPackagePurchases[fecha] || [];
+
+        packagesForDate.forEach(pkg => {
+            // Verificar si el paquete aún tiene créditos disponibles
+            const creditsInfo = getPatientCreditsInfo(pkg.patientName, pkg.therapist);
+            const remainingCredits = creditsInfo ? creditsInfo.totalRemaining : 0;
+
+            if (remainingCredits > 0) {
+                // Paquete activo - agregar a la lista con fecha de referencia
+                allActivePackages.push({
+                    ...pkg,
+                    _purchaseDate: fecha,
+                    _remainingCredits: remainingCredits,
+                    _totalCredits: creditsInfo ? creditsInfo.totalOriginal : pkg.totalSessions
+                });
+            } else {
+                // Paquete agotado - marcar para eliminación
+                packagesToRemove.push({ fecha, packageId: pkg.id });
+            }
+        });
+    });
+
+    // Limpiar paquetes agotados de dailyPackagePurchases
+    if (packagesToRemove.length > 0) {
+        packagesToRemove.forEach(({ fecha, packageId }) => {
+            if (dailyPackagePurchases[fecha]) {
+                const index = dailyPackagePurchases[fecha].findIndex(p => p.id === packageId);
+                if (index !== -1) {
+                    dailyPackagePurchases[fecha].splice(index, 1);
+                    console.log(`🧹 Paquete agotado eliminado: ${packageId} de fecha ${fecha}`);
+                }
+                // Si no quedan paquetes en esa fecha, eliminar la entrada
+                if (dailyPackagePurchases[fecha].length === 0) {
+                    delete dailyPackagePurchases[fecha];
+                }
+            }
+        });
+        // Guardar cambios después de limpieza
+        saveToStorageAsync();
+    }
+
+    // Ordenar por fecha de compra (más recientes primero)
+    allActivePackages.sort((a, b) => {
+        const dateA = a._purchaseDate || '';
+        const dateB = b._purchaseDate || '';
+        return dateB.localeCompare(dateA);
+    });
+
+    if (allActivePackages.length === 0) {
         container.innerHTML = '<p class="text-gray-500 text-center py-8">No hay paquetes activos</p>';
         counter.textContent = '0 paquetes activos';
         return;
     }
-    
-    // Generar HTML para cada paquete
-    const packagesHTML = todayPackages.map(package => {
-        const creditsInfo = getPatientCreditsInfo(package.patientName, package.therapist);
-        const remainingCredits = creditsInfo ? creditsInfo.totalRemaining : 0;
-        const totalCredits = creditsInfo ? creditsInfo.totalOriginal : package.totalSessions;
+
+    // Generar HTML para cada paquete activo
+    const packagesHTML = allActivePackages.map(pkg => {
+        const remainingCredits = pkg._remainingCredits;
+        const totalCredits = pkg._totalCredits;
         const usedCredits = totalCredits - remainingCredits;
-        
+        const purchaseDate = pkg._purchaseDate;
+
         return `
             <div class="border rounded-lg p-4 bg-gray-50 dark:bg-gray-700">
                 <div class="flex justify-between items-start mb-3">
                     <div>
-                        <h4 class="font-semibold text-lg">${package.patientName}</h4>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Terapeuta: ${package.therapist}</p>
+                        <h4 class="font-semibold text-lg">${pkg.patientName}</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Terapeuta: ${pkg.therapist}</p>
                     </div>
                     <div class="text-right">
-                        <span class="text-sm text-gray-500">ID: ${package.id.substring(4, 10)}</span>
-                        <p class="text-xs text-gray-500">${package.purchaseTime}</p>
+                        <span class="text-sm text-gray-500">ID: ${pkg.id.substring(4, 10)}</span>
+                        <p class="text-xs text-gray-500">${pkg.purchaseTime}</p>
                     </div>
                 </div>
-                
+
                 <div class="grid grid-cols-2 gap-4 mb-3">
                     <div>
                         <span class="text-sm text-gray-600 dark:text-gray-400">Sesiones:</span>
@@ -4606,28 +4662,28 @@ function updateActivePackagesList() {
                         <p class="font-medium text-green-600">${remainingCredits}</p>
                     </div>
                 </div>
-                
+
                 <div class="grid grid-cols-3 gap-2 text-xs">
                     <div>
                         <span class="text-gray-500">Efectivo:</span>
-                        <p class="font-medium">Gs ${package.cashToNeurotea.toLocaleString()}</p>
+                        <p class="font-medium">Gs ${pkg.cashToNeurotea.toLocaleString()}</p>
                     </div>
                     <div>
                         <span class="text-gray-500">Transf. Terap.:</span>
-                        <p class="font-medium">Gs ${package.transferToTherapist.toLocaleString()}</p>
+                        <p class="font-medium">Gs ${pkg.transferToTherapist.toLocaleString()}</p>
                     </div>
                     <div>
                         <span class="text-gray-500">Transf. NeuroTEA:</span>
-                        <p class="font-medium">Gs ${package.transferToNeurotea.toLocaleString()}</p>
+                        <p class="font-medium">Gs ${pkg.transferToNeurotea.toLocaleString()}</p>
                     </div>
                 </div>
-                
+
                 <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 flex justify-between items-center">
                     <div class="text-lg font-bold text-gray-900 dark:text-white">
-                        Total del Paquete: <span class="text-blue-600 dark:text-blue-400">${formatCurrency(package.sessionValue)}</span>
+                        Total del Paquete: <span class="text-blue-600 dark:text-blue-400">${formatCurrency(pkg.sessionValue)}</span>
                     </div>
-                    <button 
-                        onclick="eliminarPaqueteIndividual('${package.id}')" 
+                    <button
+                        onclick="eliminarPaqueteIndividual('${pkg.id}')"
                         class="text-red-500 hover:text-red-700 p-1"
                         title="Eliminar este paquete">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -4636,9 +4692,9 @@ function updateActivePackagesList() {
             </div>
         `;
     }).join('');
-    
+
     container.innerHTML = packagesHTML;
-    counter.textContent = `${todayPackages.length} paquete${todayPackages.length !== 1 ? 's' : ''} activo${todayPackages.length !== 1 ? 's' : ''}`;
+    counter.textContent = `${allActivePackages.length} paquete${allActivePackages.length !== 1 ? 's' : ''} activo${allActivePackages.length !== 1 ? 's' : ''}`;
 }
 
 /**

@@ -653,7 +653,6 @@ function renderGroupsListTab() {
 
     container.innerHTML = activeGroups.map(group => {
         const childrenCount = group.children?.length || 0;
-        const totalMax = group.totalMaxValue || 0;
 
         return `
             <div class="border rounded-lg p-4 bg-gray-50 dark:bg-gray-700">
@@ -673,19 +672,15 @@ function renderGroupsListTab() {
                 </div>
 
                 <div class="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                    <span class="font-medium">${childrenCount}</span> paciente${childrenCount !== 1 ? 's' : ''} |
-                    Valor máximo: <span class="font-medium">${formatCurrency(totalMax)}</span>
+                    <span class="font-medium">${childrenCount}</span> paciente${childrenCount !== 1 ? 's' : ''}
                 </div>
 
                 ${childrenCount > 0 ? `
                     <div class="border-t dark:border-gray-600 pt-3 mt-2">
                         <p class="text-xs font-medium text-gray-500 mb-2">Pacientes:</p>
-                        <div class="space-y-1">
+                        <div class="flex flex-wrap gap-2">
                             ${group.children.map(child => `
-                                <div class="flex justify-between items-center text-sm bg-white dark:bg-gray-800 p-2 rounded">
-                                    <span>${child.name}</span>
-                                    <span class="text-gray-500">${formatCurrency(child.amount)}</span>
-                                </div>
+                                <span class="text-sm bg-white dark:bg-gray-800 px-2 py-1 rounded">${child.name}</span>
                             `).join('')}
                         </div>
                     </div>
@@ -1153,6 +1148,17 @@ function registerGroupSession() {
     const fecha = document.getElementById('session-date')?.value || fechaActual;
     const group = groupTherapy[groupSessionTemp.groupId];
 
+    // Calcular transferencias por terapeuta (para rendición de cuentas)
+    const transfersByTherapist = {};
+    groupSessionTemp.attendance.forEach(child => {
+        if (child.present && child.transferToTherapist > 0 && child.transferToTherapistName) {
+            if (!transfersByTherapist[child.transferToTherapistName]) {
+                transfersByTherapist[child.transferToTherapistName] = 0;
+            }
+            transfersByTherapist[child.transferToTherapistName] += child.transferToTherapist;
+        }
+    });
+
     const groupSession = {
         id: Date.now(),
         fecha: fecha,
@@ -1169,7 +1175,8 @@ function registerGroupSession() {
             present: child.present,
             cashToNeurotea: child.cashToNeurotea || 0,
             transferToNeurotea: child.transferToNeurotea || 0,
-            transferToTherapist: child.transferToTherapist || 0
+            transferToTherapist: child.transferToTherapist || 0,
+            transferToTherapistName: child.transferToTherapistName || ''
         })),
 
         therapists: [...groupSessionTemp.therapists],
@@ -1188,6 +1195,9 @@ function registerGroupSession() {
         cashToNeurotea: values.totalCash,
         transferToNeurotea: values.totalTransferNeurotea,
         transferToTherapist: values.totalTransferTherapist,
+
+        // Desglose de transferencias por terapeuta (para rendición)
+        transfersByTherapist: transfersByTherapist,
 
         registeredAt: new Date().toISOString()
     };
@@ -1543,22 +1553,13 @@ function renderEditGroupChildrenList() {
         return;
     }
 
-    // Calcular total máximo del grupo
-    const totalMax = group.children.reduce((sum, child) => sum + child.amount, 0);
-    group.totalMaxValue = totalMax;
-
+    // Renderizar lista de niños (sin montos - estos se ingresan al registrar la sesión)
     container.innerHTML = group.children.map(child => `
         <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded mb-2">
             <div class="flex-1">
                 <span class="font-medium">${child.name}</span>
             </div>
-            <div class="flex items-center space-x-2">
-                <span class="text-sm text-gray-600 dark:text-gray-400 mr-2">${formatCurrency(child.amount)}</span>
-                <input type="number"
-                       id="child-amount-${child.id}"
-                       value="${child.amount}"
-                       onchange="editChildInGroup('${currentEditingGroupId}', '${child.id}', this.value); renderEditGroupChildrenList();"
-                       class="w-24 p-1 border rounded text-sm text-right dark:bg-gray-600 dark:border-gray-500">
+            <div class="flex items-center">
                 <button onclick="removeChildFromGroup('${currentEditingGroupId}', '${child.id}'); renderEditGroupChildrenList();"
                         class="text-red-500 hover:text-red-700 p-1">
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -1567,11 +1568,11 @@ function renderEditGroupChildrenList() {
         </div>
     `).join('');
 
-    // Mostrar total del grupo
+    // Mostrar cantidad de niños
     container.innerHTML += `
         <div class="mt-3 pt-3 border-t dark:border-gray-600 flex justify-between items-center">
-            <span class="font-medium">Total Máximo del Grupo:</span>
-            <span class="font-bold text-lg">${formatCurrency(totalMax)}</span>
+            <span class="font-medium">Total de niños:</span>
+            <span class="font-bold text-lg">${group.children.length}</span>
         </div>
     `;
 
@@ -1588,14 +1589,12 @@ function addChildToCurrentGroup() {
     if (!currentEditingGroupId) return;
 
     const nameInput = document.getElementById('new-child-name');
-    const amountInput = document.getElementById('new-child-amount');
 
     const name = nameInput.value.trim();
-    const amount = parseNumber(amountInput.value);
 
-    if (addChildToGroup(currentEditingGroupId, name, amount)) {
+    // El monto se ingresa al momento de registrar la sesión, no al crear el grupo
+    if (addChildToGroup(currentEditingGroupId, name, 0)) {
         nameInput.value = '';
-        amountInput.value = '';
         renderEditGroupChildrenList();
     }
 }
@@ -1738,13 +1737,21 @@ function renderGroupAttendanceList(group) {
         return;
     }
 
+    // Generar opciones de terapeutas para el selector
+    const therapistOptions = groupSessionTemp.therapists.map(t =>
+        `<option value="${t}">${t}</option>`
+    ).join('');
+    const hasTherapists = groupSessionTemp.therapists.length > 0;
+
     // Renderizar cada niño con checkbox de asistencia y campos de pago
     container.innerHTML = group.children.map((child, index) => {
         const attendance = groupSessionTemp.attendance[index];
         const isPresent = attendance ? attendance.present : true;
+        const amountValue = attendance?.amount || child.amount || 0;
         const cashValue = attendance?.cashToNeurotea || 0;
         const transferNeuroValue = attendance?.transferToNeurotea || 0;
         const transferTherapistValue = attendance?.transferToTherapist || 0;
+        const selectedTherapist = attendance?.transferToTherapistName || '';
 
         return `
             <div class="bg-white dark:bg-gray-800 rounded-lg p-3 border ${isPresent ? 'border-green-300 dark:border-green-600' : 'border-gray-300 dark:border-gray-600 opacity-60'}">
@@ -1753,21 +1760,34 @@ function renderGroupAttendanceList(group) {
                         <input type="checkbox" id="attendance-${index}" class="mr-3 w-5 h-5" ${isPresent ? 'checked' : ''} onchange="toggleChildAttendance(${index})">
                         <label for="attendance-${index}" class="font-medium">${child.name}</label>
                     </div>
-                    <span class="text-sm font-bold text-gray-700 dark:text-gray-300">${formatCurrency(child.amount)}</span>
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-gray-500">Monto:</label>
+                        <input type="number" id="child-amount-${index}" class="w-24 p-1 text-sm border rounded font-bold text-right" placeholder="0" value="${amountValue || ''}" oninput="updateGroupSessionValues()">
+                    </div>
                 </div>
 
-                <div id="payment-fields-${index}" class="${isPresent ? '' : 'hidden'} grid grid-cols-3 gap-2 mt-2">
-                    <div>
-                        <label class="block text-xs text-green-600 font-medium mb-1">Efectivo</label>
-                        <input type="number" id="child-cash-${index}" class="w-full p-1 text-sm border rounded campo-efectivo" placeholder="0" value="${cashValue || ''}" oninput="updateGroupSessionValues()">
+                <div id="payment-fields-${index}" class="${isPresent ? '' : 'hidden'} space-y-2 mt-2">
+                    <div class="grid grid-cols-3 gap-2">
+                        <div>
+                            <label class="block text-xs text-green-600 font-medium mb-1">Efectivo</label>
+                            <input type="number" id="child-cash-${index}" class="w-full p-1 text-sm border rounded campo-efectivo" placeholder="0" value="${cashValue || ''}" oninput="updateGroupSessionValues()">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-blue-600 font-medium mb-1">Transf. NeuroTEA</label>
+                            <input type="number" id="child-transfer-neurotea-${index}" class="w-full p-1 text-sm border rounded campo-transferencia-neurotea" placeholder="0" value="${transferNeuroValue || ''}" oninput="updateGroupSessionValues()">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-purple-600 font-medium mb-1">Transf. Terapeuta</label>
+                            <input type="number" id="child-transfer-therapist-${index}" class="w-full p-1 text-sm border rounded campo-transferencia-terapeuta" placeholder="0" value="${transferTherapistValue || ''}" oninput="updateGroupSessionValues()">
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-xs text-blue-600 font-medium mb-1">Transf. NeuroTEA</label>
-                        <input type="number" id="child-transfer-neurotea-${index}" class="w-full p-1 text-sm border rounded campo-transferencia-neurotea" placeholder="0" value="${transferNeuroValue || ''}" oninput="updateGroupSessionValues()">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-purple-600 font-medium mb-1">Transf. Terapeuta</label>
-                        <input type="number" id="child-transfer-therapist-${index}" class="w-full p-1 text-sm border rounded campo-transferencia-terapeuta" placeholder="0" value="${transferTherapistValue || ''}" oninput="updateGroupSessionValues()">
+                    <!-- Selector de terapeuta para transferencia -->
+                    <div id="therapist-selector-${index}" class="${transferTherapistValue > 0 && hasTherapists ? '' : 'hidden'}">
+                        <label class="block text-xs text-purple-600 font-medium mb-1">¿A cuál terapeuta se transfirió?</label>
+                        <select id="child-transfer-therapist-name-${index}" class="w-full p-1 text-sm border rounded campo-transferencia-terapeuta" onchange="updateGroupSessionValues()">
+                            <option value="">-- Seleccionar terapeuta --</option>
+                            ${therapistOptions}
+                        </select>
                     </div>
                 </div>
             </div>
@@ -1779,13 +1799,22 @@ function renderGroupAttendanceList(group) {
         groupSessionTemp.attendance = group.children.map(child => ({
             childId: child.id,
             childName: child.name,
-            amount: child.amount,
+            amount: child.amount || 0,
             present: true,
             cashToNeurotea: 0,
             transferToNeurotea: 0,
-            transferToTherapist: 0
+            transferToTherapist: 0,
+            transferToTherapistName: ''
         }));
     }
+
+    // Restaurar valores de selectores de terapeuta si ya estaban seleccionados
+    groupSessionTemp.attendance.forEach((att, index) => {
+        const select = document.getElementById(`child-transfer-therapist-name-${index}`);
+        if (select && att.transferToTherapistName) {
+            select.value = att.transferToTherapistName;
+        }
+    });
 }
 
 /**
@@ -1858,27 +1887,8 @@ function updateGroupSessionValues() {
     const group = groupTherapy[groupId];
     if (!group) return;
 
-    // Actualizar asistencia y pagos desde checkboxes e inputs
-    if (group.children) {
-        groupSessionTemp.attendance = group.children.map((child, index) => {
-            const checkbox = document.getElementById(`attendance-${index}`);
-            const cashInput = document.getElementById(`child-cash-${index}`);
-            const transferNeuroInput = document.getElementById(`child-transfer-neurotea-${index}`);
-            const transferTherapistInput = document.getElementById(`child-transfer-therapist-${index}`);
-
-            return {
-                childId: child.id,
-                childName: child.name,
-                amount: child.amount,
-                present: checkbox?.checked || false,
-                cashToNeurotea: parseNumber(cashInput?.value || 0),
-                transferToNeurotea: parseNumber(transferNeuroInput?.value || 0),
-                transferToTherapist: parseNumber(transferTherapistInput?.value || 0)
-            };
-        });
-    }
-
-    // Actualizar terapeutas desde checkboxes
+    // Primero actualizar la lista de terapeutas seleccionadas
+    const previousTherapists = [...groupSessionTemp.therapists];
     groupSessionTemp.therapists = [];
     therapists.forEach((therapist, index) => {
         const checkbox = document.getElementById(`therapist-${index}`);
@@ -1886,6 +1896,49 @@ function updateGroupSessionValues() {
             groupSessionTemp.therapists.push(therapist);
         }
     });
+
+    // Verificar si cambió la lista de terapeutas para re-renderizar
+    const therapistsChanged = JSON.stringify(previousTherapists) !== JSON.stringify(groupSessionTemp.therapists);
+
+    // Actualizar asistencia y pagos desde checkboxes e inputs
+    if (group.children) {
+        groupSessionTemp.attendance = group.children.map((child, index) => {
+            const checkbox = document.getElementById(`attendance-${index}`);
+            const amountInput = document.getElementById(`child-amount-${index}`);
+            const cashInput = document.getElementById(`child-cash-${index}`);
+            const transferNeuroInput = document.getElementById(`child-transfer-neurotea-${index}`);
+            const transferTherapistInput = document.getElementById(`child-transfer-therapist-${index}`);
+            const transferTherapistNameSelect = document.getElementById(`child-transfer-therapist-name-${index}`);
+            const therapistSelectorDiv = document.getElementById(`therapist-selector-${index}`);
+
+            const transferToTherapist = parseNumber(transferTherapistInput?.value || 0);
+
+            // Mostrar/ocultar selector de terapeuta según si hay monto y terapeutas
+            if (therapistSelectorDiv) {
+                if (transferToTherapist > 0 && groupSessionTemp.therapists.length > 0) {
+                    therapistSelectorDiv.classList.remove('hidden');
+                } else {
+                    therapistSelectorDiv.classList.add('hidden');
+                }
+            }
+
+            return {
+                childId: child.id,
+                childName: child.name,
+                amount: parseNumber(amountInput?.value || child.amount || 0),
+                present: checkbox?.checked || false,
+                cashToNeurotea: parseNumber(cashInput?.value || 0),
+                transferToNeurotea: parseNumber(transferNeuroInput?.value || 0),
+                transferToTherapist: transferToTherapist,
+                transferToTherapistName: transferTherapistNameSelect?.value || ''
+            };
+        });
+    }
+
+    // Si cambió la lista de terapeutas, re-renderizar para actualizar los selectores
+    if (therapistsChanged && group.children && group.children.length > 0) {
+        renderGroupAttendanceList(group);
+    }
 
     // Calcular valores
     const values = calculateGroupSessionValues();

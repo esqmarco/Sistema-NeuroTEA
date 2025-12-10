@@ -870,31 +870,46 @@ function deleteGroup(groupId) {
         .some(session => session.groupId === groupId);
 
     if (hasActiveSessions) {
-        // Soft delete - solo marcar como inactivo
-        if (!confirm(`El ${group.name} tiene sesiones registradas. ¿Desea marcarlo como inactivo? (No se eliminará, solo se ocultará)`)) {
+        // Preguntar si desea eliminar también las sesiones
+        if (!confirm(`El grupo "${group.name}" tiene sesiones registradas.\n\n¿Desea eliminar el grupo Y sus sesiones?\n\n(Seleccione "Cancelar" para mantener el grupo)`)) {
             return false;
         }
 
-        groupTherapy[groupId].status = 'inactive';
+        // Eliminar las sesiones grupales asociadas
+        Object.keys(groupSessions).forEach(fecha => {
+            groupSessions[fecha] = groupSessions[fecha].filter(session => session.groupId !== groupId);
+            if (groupSessions[fecha].length === 0) {
+                delete groupSessions[fecha];
+            }
+        });
 
-        addToGroupHistory(groupId, 'deactivate', {});
-        logGroupOperation('group_deactivate', { groupId: groupId, groupName: group.name });
-
+        logGroupOperation('group_sessions_deleted', { groupId: groupId, groupName: group.name });
     } else {
-        // Eliminación real
-        if (!confirm(`¿Está seguro de eliminar ${group.name}? Esta acción no se puede deshacer.`)) {
+        // Confirmación normal
+        if (!confirm(`¿Está seguro de eliminar "${group.name}"?\n\nEsta acción no se puede deshacer.`)) {
             return false;
         }
-
-        addToGroupHistory(groupId, 'delete', {});
-        logGroupOperation('group_delete', { groupId: groupId, groupName: group.name });
-
-        delete groupTherapy[groupId];
     }
 
-    saveGroupTherapyToStorage();
+    // Eliminar definitivamente el grupo
+    addToGroupHistory(groupId, 'delete', {});
+    logGroupOperation('group_delete', { groupId: groupId, groupName: group.name });
+
+    // Eliminar de memoria
+    delete groupTherapy[groupId];
+
+    // Eliminar de IndexedDB directamente
+    deleteFromIndexedDB('groupTherapy', groupId).then(() => {
+        console.log('✅ Grupo eliminado de IndexedDB:', groupId);
+    }).catch(err => {
+        console.error('❌ Error eliminando grupo de IndexedDB:', err);
+    });
+
+    saveToStorageAsync(); // Guardar también las sesiones grupales actualizadas
     renderGroupList();
     renderGroupsListTab();
+
+    alert(`Grupo "${group.name}" eliminado exitosamente`);
     return true;
 }
 

@@ -5556,23 +5556,24 @@ function validatePaymentMode() {
 
 /**
  * Elimina un paquete individual por su ID
+ * CORREGIDO: Ahora también elimina los créditos asociados de patientCredits
  * @param {string} packageId - ID del paquete a eliminar
  */
 async function eliminarPaqueteIndividual(packageId) {
     try {
         console.log('🗑️ Eliminando paquete:', packageId);
-        
+
         // Buscar y eliminar el paquete de dailyPackagePurchases
         let paqueteEliminado = null;
-        
+
         for (const fecha in dailyPackagePurchases) {
             const paquetes = dailyPackagePurchases[fecha];
             const index = paquetes.findIndex(pkg => pkg.id === packageId);
-            
+
             if (index !== -1) {
                 paqueteEliminado = paquetes[index];
                 paquetes.splice(index, 1);
-                
+
                 // Si no quedan paquetes en esa fecha, eliminar la entrada
                 if (paquetes.length === 0) {
                     delete dailyPackagePurchases[fecha];
@@ -5580,15 +5581,47 @@ async function eliminarPaqueteIndividual(packageId) {
                 break;
             }
         }
-        
+
         if (!paqueteEliminado) {
             console.error('Paquete no encontrado:', packageId);
             showNotification('Error: No se pudo encontrar el paquete a eliminar.', 'error');
             return;
         }
-        
+
         console.log('✅ Paquete eliminado de memoria:', paqueteEliminado);
-        
+
+        // CORRECCIÓN: Eliminar también los créditos asociados de patientCredits
+        const { patientName, therapist } = paqueteEliminado;
+        if (patientCredits[patientName] && patientCredits[patientName][therapist]) {
+            const credits = patientCredits[patientName][therapist];
+
+            if (Array.isArray(credits)) {
+                // Múltiples paquetes - buscar y eliminar el que coincida con packageId
+                const creditIndex = credits.findIndex(c => c.packageId === packageId);
+                if (creditIndex !== -1) {
+                    credits.splice(creditIndex, 1);
+                    console.log(`✅ Créditos eliminados de patientCredits (array) para packageId: ${packageId}`);
+
+                    // Si no quedan créditos, limpiar la entrada
+                    if (credits.length === 0) {
+                        delete patientCredits[patientName][therapist];
+                    }
+                }
+            } else {
+                // Paquete único - verificar si coincide el packageId
+                if (credits.packageId === packageId) {
+                    delete patientCredits[patientName][therapist];
+                    console.log(`✅ Créditos eliminados de patientCredits (único) para packageId: ${packageId}`);
+                }
+            }
+
+            // Si no quedan terapeutas para este paciente, limpiar la entrada del paciente
+            if (Object.keys(patientCredits[patientName]).length === 0) {
+                delete patientCredits[patientName];
+                console.log(`✅ Entrada de paciente eliminada: ${patientName}`);
+            }
+        }
+
         // CORRECCIÓN QUIRÚRGICA: Eliminar también del IndexedDB
         try {
             await deleteFromIndexedDB('dailyPackagePurchases', packageId);
@@ -5597,17 +5630,17 @@ async function eliminarPaqueteIndividual(packageId) {
             console.error('Error al eliminar del IndexedDB:', dbError);
             // Continuar con el proceso aunque falle el IndexedDB
         }
-        
+
         // Actualizar las vistas
         updateActivePackagesList();
         updateAllViews(fechaActual);
-        
-        // Guardar cambios
+
+        // Guardar cambios (incluye patientCredits)
         saveToStorage();
-        
+
         // Mostrar mensaje de éxito
         showNotification(`Paquete eliminado: ${paqueteEliminado.patientName}`, 'success');
-        
+
     } catch (error) {
         console.error('Error al eliminar paquete:', error);
         showNotification('Error al eliminar el paquete. Por favor, inténtalo de nuevo.', 'error');

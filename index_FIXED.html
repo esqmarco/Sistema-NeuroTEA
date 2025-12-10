@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="es" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema NeuroTEA R9 - Gestión de Sesiones</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        :root {
+            --neurotea-blue: #4A90E2;
+            --neurotea-blue-dark: #357ABD;
+            --neurotea-blue-light: #6BA3E8;
+        }
+        
+        /* Sobrescribir colores púrpura con azul NeuroTEA */
+        .bg-purple-600 { background-color: var(--neurotea-blue) !important; }
+        .bg-purple-700 { background-color: var(--neurotea-blue-dark) !important; }
+        .hover\\:bg-purple-700:hover { background-color: var(--neurotea-blue-dark) !important; }
+        .text-purple-600 { color: var(--neurotea-blue) !important; }
+        .border-purple-500 { border-color: var(--neurotea-blue) !important; }
+        .focus\\:border-purple-500:focus { border-color: var(--neurotea-blue) !important; }
+        .focus\\:ring-purple-500:focus { --tw-ring-color: var(--neurotea-blue) !important; }
+        
+        .active-tab {
+            background-color: rgba(0, 0, 0, 0.2);
+            border-bottom: 2px solid #fff;
+        }
+        .badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge-success {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+        .badge-primary {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+        .badge-warning {
+            background-color: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+        .badge-info {
+            background-color: rgba(14, 165, 233, 0.2);
+            color: #0ea5e9;
+        }
+        .badge-danger {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        .badge-secondary {
+            background-color: rgba(107, 114, 128, 0.2);
+            color: #6b7280;
+        }
+        
+        /* Estilos para campos identificativos de pago */
+        .campo-efectivo {
+            background-color: rgba(16, 185, 129, 0.15) !important;
+            border-color: #10b981 !important;
+            color: #065f46 !important;
+        }
+        .campo-efectivo::placeholder {
+            color: #059669 !important;
+        }
+        .label-efectivo {
+            color: #065f46 !important;
+            font-weight: 600;
+        }
+        
+        .campo-transferencia-neurotea {
+            background-color: rgba(59, 130, 246, 0.15) !important;
+            border-color: #3b82f6 !important;
+            color: #1e3a8a !important;
+        }
+        .campo-transferencia-neurotea::placeholder {
+            color: #2563eb !important;
+        }
+        .label-transferencia-neurotea {
+            color: #1e3a8a !important;
+            font-weight: 600;
+        }
+        
+        .campo-transferencia-terapeuta {
+            background-color: rgba(139, 92, 246, 0.15) !important;
+            border-color: #8b5cf6 !important;
+            color: #581c87 !important;
+        }
+        .campo-transferencia-terapeuta::placeholder {
+            color: #7c3aed !important;
+        }
+        .label-transferencia-terapeuta {
+            color: #581c87 !important;
+            font-weight: 600;
+        }
+        
+        /* Estilos para el nuevo dashboard */
+        .dashboard-card {
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .dashboard-card.ingreso-total {
+            background-color: #f3f4f6;
+            color: #111827;
+        }
+        .dashboard-card.aporte-neurotea {
+            background-color: rgba(20, 184, 166, 0.15);
+            color: #134e4a;
+        }
+        .dashboard-card.saldo-caja {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: #92400e;
+        }
+        .dashboard-card.total-efectivo {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: #065f46;
+        }
+        .dashboard-card.total-transf-neurotea {
+            background-color: rgba(59, 130, 246, 0.15);
+            color: #1e3a8a;
+        }
+        .dashboard-card.total-transf-terapeuta {
+            background-color: rgba(139, 92, 246, 0.15);
+            color: #581c87;
+        }
+        
+        /* Estilos para confirmación de pagos */
+        .btn-confirmar {
+            background-color: #10b981;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-confirmar:hover {
+            background-color: #059669;
+        }
+        
+        .total-egresos-card {
+            border-left: 4px solid #ef4444;
+            background-color: rgba(239, 68, 68, 0.1);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        /* Estilos para saldo en caja en rendición */
+        .saldo-caja-card {
+            background-color: rgba(245, 158, 11, 0.15);
+            border-left: 4px solid #f59e0b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+        }
+        
+        /* Estilos para badge de saldo inicial */
+        #saldo-inicial-badge {
+            background-color: rgba(107, 114, 128, 0.1);
+            color: #6b7280;
+            border: 1px solid rgba(107, 114, 128, 0.2);
+        }
+        /* El badge siempre mantiene el mismo estilo gris */
+        #saldo-inicial-badge.saldo-configurado,
+        #saldo-inicial-badge.saldo-editado {
+            background-color: rgba(107, 114, 128, 0.1);
+            color: #6b7280;
+            border: 1px solid rgba(107, 114, 128, 0.2);
+        }
+        /* Solo el punto cambia de color */
+        #saldo-status-dot {
+            background-color: #9ca3af; /* Gris por defecto (sin definir) */
+        }
+        #saldo-status-dot.saldo-configurado {
+            background-color: #22c55e; /* Verde (configurado) */
+        }
+        #saldo-status-dot.saldo-editado {
+            background-color: #f97316; /* Naranja (editado) */
+        }
+        
+        /* Estilos para sesiones con crédito */
+        .session-credit {
+            /* Sesiones individuales: MISMO FONDO que sesiones normales */
+            border-left-color: inherit; /* Mismo borde que sesiones normales */
+        }
+        
+        .therapist-section-credits {
+            /* Encabezado de terapeuta: SÍ tiene fondo beige */
+            background-color: #F5F1E8; /* Fondo beige cálido para encabezado */
+            border-left: 4px solid #D7CCC8; /* Borde marrón suave */
+        }
+        
+        .therapist-section-credits:hover {
+            background-color: #F0EBE0; /* Beige más oscuro en hover */
+        }
+        
+        .credit-text-primary {
+            color: #6D4C41 !important; /* Marrón oscuro para "Crédito Usado X/Y" */
+        }
+        
+        .credit-text-secondary {
+            color: #6D4C41 !important; /* Marrón oscuro consistente */
+        }
+        
+        .credit-text-bold {
+            color: #6D4C41 !important; /* Marrón oscuro para texto importante */
+            font-weight: 600;
+        }
+        
+        /* Dark mode para sesiones con crédito */
+        .dark .session-credit {
+            /* Sesiones individuales: mismo fondo en dark mode */
+            border-left-color: inherit;
+        }
+        
+        .dark .therapist-section-credits {
+            /* Encabezado de terapeuta: fondo oscuro en dark mode */
+            background-color: #3E2723;
+            border-left-color: #5D4037;
+        }
+        
+        .dark .therapist-section-credits:hover {
+            background-color: #4E342E;
+        }
+        
+        .dark .credit-text-primary {
+            color: #A1887F !important; /* Marrón claro para dark mode */
+        }
+        
+        .dark .credit-text-secondary {
+            color: #A1887F !important; /* Marrón claro consistente */
+        }
+        
+        .dark .credit-text-bold {
+            color: #BCAAA4 !important; /* Marrón claro para texto importante */
+        }
+        
+        /* Botones de confirmación de transferencias */
+        .transfer-status-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            border: none;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .transfer-status-btn.pending {
+            background-color: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+
+        .transfer-status-btn.confirmed {
+            background-color: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .transfer-status-btn:hover {
+            opacity: 0.8;
+        }
+
+        .patient-info {
+            color: #6b7280;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+
+        .confirmed-count {
+            color: #059669;
+            font-weight: 600;
+        }
+
+        .pending-count {
+            color: #dc2626;
+            font-weight: 600;
+        }
+
+        .debt-payment-select {
+            background-color: #fef2f2;
+            border: 1px solid #fca5a5;
+            color: #991b1b;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .debt-payment-select:hover {
+            background-color: #fee2e2;
+            border-color: #f87171;
+        }
+
+        /* ===========================
+           ESTILOS PARA ADMINISTRACIÓN
+           =========================== */
+        
+        .admin-module-navigation {
+            margin-bottom: 1.5rem;
+        }
+        
+        .admin-module-tab {
+            padding: 0.75rem 1rem;
+            border: none;
+            background: #f3f4f6;
+            color: #374151;
+            border-radius: 0.5rem 0.5rem 0 0;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .admin-module-tab:hover:not(.disabled) {
+            background: #e5e7eb;
+        }
+        
+        .admin-module-tab.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .admin-module-tab.disabled {
+            background: #f9fafb;
+            color: #9ca3af;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .admin-module-content {
+            display: block;
+        }
+        
+        .admin-module-content.hidden {
+            display: none;
+        }
+        
+        .btn-export {
+            background: #10b981;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-export:hover {
+            background: #059669;
+        }
+        
+        .btn-import {
+            background: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-import:hover {
+            background: #2563eb;
+        }
+        
+        .btn-backup {
+            background: #8b5cf6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-backup:hover {
+            background: #7c3aed;
+        }
+        
+        .btn-restore {
+            background: #ef4444;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-restore:hover {
+            background: #dc2626;
+        }
+        
+        .btn-pdf-icon {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .btn-pdf-icon:hover {
+            background: #f3f4f6;
+            transform: scale(1.05);
+        }
+        
+        /* Estilos para modo oscuro en administración */
+        .dark .admin-module-tab {
+            background: #374151;
+            color: #d1d5db;
+        }
+        
+        .dark .admin-module-tab:hover:not(.disabled) {
+            background: #4b5563;
+        }
+        
+        .dark .admin-module-tab.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .dark .admin-module-tab.disabled {
+            background: #1f2937;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 min-h-screen">
+    <header class="bg-purple-700 dark:bg-purple-900 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <i data-lucide="brain" class="w-8 h-8"></i>
+                <div>
+                    <h1 class="text-xl font-bold">NeuroTEA</h1>
+                    <p class="text-sm opacity-90">Sistema de Gestión</p>
+                </div>
+            </div>
+            <button id="theme-toggle" class="p-2 rounded-md hover:bg-purple-600 transition-colors">
+                <i data-lucide="moon" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </header>
+
+    <nav class="bg-purple-600 dark:bg-purple-800 text-white p-2 shadow-sm">
+        <div class="container mx-auto">
+            <div class="flex flex-wrap gap-2">
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2 active-tab" onclick="switchTab(0)">
+                    <i data-lucide="clipboard-list" class="w-4 h-4"></i>
+                    <span>Registro Diario</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(1)">
+                    <i data-lucide="bar-chart-2" class="w-4 h-4"></i>
+                    <span>Resumen Global</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(2)">
+                    <i data-lucide="credit-card" class="w-4 h-4"></i>
+                    <span>Transferencias</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(3)">
+                    <i data-lucide="calculator" class="w-4 h-4"></i>
+                    <span>Rendición de Cuentas</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(4)">
+                    <i data-lucide="minus-circle" class="w-4 h-4"></i>
+                    <span>Egresos</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(5)">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                    <span>Gestionar Terapeutas</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(6)">
+                    <i data-lucide="package" class="w-4 h-4"></i>
+                    <span>Paquetes / Créditos</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(7)">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                    <span>Administración</span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto p-4">
+        <!-- Vista de Registro Diario -->
+        <div id="registro-view" class="space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Formulario de registro -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-bold mb-4 flex items-center">
+                        <i data-lucide="user" class="w-6 h-6 mr-2"></i>
+                        Registro de Sesión
+                    </h2>
+                    <p class="text-gray-600 dark:text-gray-400 mb-4">Ingrese los datos de la sesión</p>
+                    
+                    <!-- Badge de Saldo Inicial -->
+                    <div class="mb-4">
+                        <button id="saldo-inicial-badge" onclick="openSaldoModal()" class="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer hover:opacity-80">
+                            <i data-lucide="coins" class="w-4 h-4 mr-2"></i>
+                            <span>Saldo inicial</span>
+                            <div id="saldo-status-dot" class="w-2 h-2 rounded-full ml-2"></div>
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="session-date">
+                                Fecha
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </label>
+                            <input type="date" id="session-date" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="therapist-select">
+                                Terapeuta
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </label>
+                            <div class="flex space-x-2">
+                                <select id="therapist-select" class="flex-1 p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                                    <option value="">Seleccionar terapeuta</option>
+                                </select>
+                                <div class="text-sm text-gray-500 dark:text-gray-400 py-2" id="therapist-counter">0 terapeutas disponibles</div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="patient-name">
+                                Nombre y Apellido del Paciente
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </label>
+                            <input type="text" id="patient-name" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="Ej: Lucía García">
+                        </div>
+                        
+                        <!-- FASE 3: Selector de modo de registro -->
+                        <div>
+                            <label class="block text-sm font-medium mb-2">
+                                Modo de Registro
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </label>
+                            <div class="space-y-2">
+                                <div class="flex items-center">
+                                    <input type="radio" id="modo-pago-dia" name="modo-registro" value="pago-dia" checked class="mr-2">
+                                    <label for="modo-pago-dia" class="text-sm">Pago del día</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input type="radio" id="modo-usar-credito" name="modo-registro" value="usar-credito" class="mr-2">
+                                    <label for="modo-usar-credito" class="text-sm">Usar crédito disponible</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- FASE 3: Sección de créditos adicionales (modo pago del día) - MINI CARRITO -->
+                        <div id="creditos-adicionales-section" class="border-t pt-4">
+                            <div class="flex items-center mb-2">
+                                <input type="checkbox" id="crear-creditos-adicionales" class="mr-2">
+                                <label for="crear-creditos-adicionales" class="text-sm font-medium">
+                                    Pagar sesiones futuras adicionales
+                                </label>
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </div>
+                            
+                            <!-- NUEVO: Mini Carrito de Sesiones Futuras -->
+                            <div id="sesiones-futuras-container" style="display: none;" class="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg border">
+                                <h4 class="font-medium mb-3 text-gray-800 dark:text-gray-200">
+                                    🛒 Sesiones Futuras a Pagar Hoy:
+                                </h4>
+                                
+                                <!-- Formulario para agregar sesiones -->
+                                <div class="flex gap-2 mb-3 p-3 bg-white dark:bg-gray-800 rounded border">
+                                    <div class="flex-1">
+                                        <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Terapeuta:</label>
+                                        <select id="terapeuta-futura-select" class="w-full p-2 border rounded text-sm dark:bg-gray-700 dark:border-gray-600">
+                                            <option value="">Seleccionar terapeuta...</option>
+                                            <!-- Se llena dinámicamente con lista de terapeutas -->
+                                        </select>
+                                    </div>
+                                    <div class="w-24">
+                                        <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Cantidad:</label>
+                                        <input type="number" 
+                                               id="cantidad-futura-input" 
+                                               class="w-full p-2 border rounded text-sm text-center dark:bg-gray-700 dark:border-gray-600" 
+                                               value="1" 
+                                               min="1" 
+                                               max="20">
+                                    </div>
+                                    <div class="flex items-end">
+                                        <button type="button" 
+                                                id="agregar-sesion-futura-btn" 
+                                                class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded font-medium">
+                                            + Agregar
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Lista de sesiones futuras agregadas -->
+                                <div id="lista-sesiones-futuras" class="space-y-3 mb-3">
+                                    <div class="text-gray-500 dark:text-gray-400 text-sm text-center py-2 italic">
+                                        No hay sesiones futuras agregadas
+                                    </div>
+                                </div>
+                                
+                                <!-- Resumen total -->
+                                <div id="resumen-sesiones-futuras" class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded" style="display: none;">
+                                    <div class="flex justify-between items-center text-sm mb-1">
+                                        <span>Sesión de hoy:</span>
+                                        <span class="font-medium" id="total-sesion-actual">Gs 0</span>
+                                    </div>
+                                    <div class="flex justify-between items-center text-sm mb-2">
+                                        <span>Sesiones futuras:</span>
+                                        <span class="font-medium" id="total-sesiones-futuras">Gs 0</span>
+                                    </div>
+                                    <div class="border-t pt-2">
+                                        <div class="flex justify-between items-center">
+                                            <span class="font-bold">GRAN TOTAL A PAGAR:</span>
+                                            <span class="font-bold text-lg text-green-600 dark:text-green-400" id="gran-total-pagar">Gs 0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="text-xs text-gray-600 dark:text-gray-400 mt-2">
+                                    💡 <strong>Tip:</strong> Cada sesión futura tendrá su propio desglose de pago. 
+                                    Mañana solo necesitarás usar "Crédito disponible".
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- FASE 3: Sección de selección de paciente con créditos (modo usar crédito) -->
+                        <div id="paciente-credito-section" style="display: none;" class="border-t pt-4">
+                            <label class="block text-sm font-medium mb-1">Seleccionar paciente con créditos:</label>
+                            <select id="paciente-credito-select" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                                <option value="">Seleccionar paciente...</option>
+                            </select>
+                            <div id="creditos-info-display" class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                                <!-- Información de créditos disponibles -->
+                            </div>
+                        </div>
+                        
+                        <div id="desglose-pago-section">
+                            <label class="block text-sm font-medium mb-2">
+                                Desglose del Pago
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </label>
+                            <div class="space-y-3">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1 label-efectivo">Efectivo en NeuroTEA (Caja)</label>
+                                        <div class="relative">
+                                            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400">Gs</span>
+                                            <input type="number" id="cash-to-neurotea" class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600 campo-efectivo" placeholder="0">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1 label-transferencia-terapeuta">Transferencia a Terapeuta</label>
+                                        <div class="relative">
+                                            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400">Gs</span>
+                                            <input type="number" id="transfer-to-therapist" class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600 campo-transferencia-terapeuta" placeholder="0">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium mb-1 label-transferencia-neurotea">Transferencia a NeuroTEA</label>
+                                        <div class="relative">
+                                            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400">Gs</span>
+                                            <input type="number" id="transfer-to-neurotea" class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600 campo-transferencia-neurotea" placeholder="0">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md">
+                                    <div class="flex justify-between text-sm font-bold">
+                                        <span>Valor de la sesión:</span>
+                                        <span id="session-value-display" class="text-blue-600 dark:text-blue-400">Gs 0</span>
+                                    </div>
+                                    <div class="flex justify-between text-sm">
+                                        <span>Aporte NeuroTEA:</span>
+                                        <span id="neurotea-contribution-display" class="font-medium text-orange-600">Gs 0</span>
+                                    </div>
+                                    <div class="flex justify-between text-sm font-bold">
+                                        <span>Honorarios terapeuta:</span>
+                                        <span id="therapist-fee-display" class="text-green-600">Gs 0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="aporte-neurotea-section">
+                            <label class="block text-sm font-medium mb-2">
+                                Aporte a NeuroTEA
+                                <i data-lucide="info" class="w-4 h-4 inline-block ml-1 text-gray-400"></i>
+                            </label>
+                            <div class="space-y-2">
+                                <div class="flex items-center">
+                                    <input type="radio" id="contribution-20" name="neurotea-contribution" value="20" checked class="mr-2">
+                                    <label for="contribution-20">20%</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input type="radio" id="contribution-30" name="neurotea-contribution" value="30" class="mr-2">
+                                    <label for="contribution-30">30%</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input type="radio" id="contribution-fixed" name="neurotea-contribution" value="fixed" class="mr-2">
+                                    <label for="contribution-fixed">Monto Fijo</label>
+                                </div>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400">Gs</span>
+                                    <input type="number" placeholder="Monto fijo" id="fixed-amount-input" disabled class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button id="register-btn" class="w-full bg-gray-400 text-white py-2 px-4 rounded-md cursor-not-allowed" disabled>
+                            Registrar Sesión
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Registros del día -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold flex items-center">
+                            <i data-lucide="list" class="w-5 h-5 mr-2"></i>
+                            Registros del Día
+                        </h3>
+                        <button id="new-day-btn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md text-sm">
+                            Limpiar Registros del Día
+                        </button>
+                    </div>
+                    <div id="daily-sessions-container" class="space-y-3">
+                        <p class="text-gray-500 text-center py-4">No hay sesiones registradas para este día</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista de Resumen Global -->
+        <div id="resumen-view" class="space-y-6" style="display: none;">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <i data-lucide="bar-chart-2" class="w-6 h-6 mr-2"></i>
+                Resumen Global del Día
+            </h2>
+            
+            <!-- Cards de resumen -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="dashboard-card ingreso-total">
+                    <h3 class="text-lg font-semibold mb-2">Ingreso Total del Día</h3>
+                    <p class="text-3xl font-bold" id="dashboard-ingreso-total">Gs 0</p>
+                </div>
+                <div class="dashboard-card aporte-neurotea">
+                    <h3 class="text-lg font-semibold mb-2">Aporte Total a NeuroTEA</h3>
+                    <p class="text-3xl font-bold" id="dashboard-aporte-neurotea">Gs 0</p>
+                </div>
+                <div class="dashboard-card saldo-caja">
+                    <h3 class="text-lg font-semibold mb-2">Saldo en Caja</h3>
+                    <p class="text-3xl font-bold" id="dashboard-saldo-caja">Gs 0</p>
+                </div>
+                <div class="dashboard-card total-efectivo">
+                    <h3 class="text-lg font-semibold mb-2">Total Efectivo</h3>
+                    <p class="text-3xl font-bold" id="dashboard-total-efectivo">Gs 0</p>
+                </div>
+                <div class="dashboard-card cuenta-neurotea bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                    <h3 class="text-lg font-semibold mb-2 text-blue-800 dark:text-blue-200">Cuenta NeuroTEA</h3>
+                    <p class="text-3xl font-bold text-blue-900 dark:text-blue-100" id="dashboard-cuenta-neurotea">Gs 0</p>
+                </div>
+                <div class="dashboard-card total-egresos bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                    <h3 class="text-lg font-semibold mb-2 text-red-800 dark:text-red-200">Total Egresos</h3>
+                    <p class="text-3xl font-bold text-red-900 dark:text-red-100" id="dashboard-total-egresos">Gs 0</p>
+                </div>
+            </div>
+            
+        </div>
+        <!-- Vista de Transferencias -->
+        <div id="transferencias-view" class="space-y-6" style="display: none;">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <i data-lucide="credit-card" class="w-6 h-6 mr-2"></i>
+                Transferencias del Día
+            </h2>
+            
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <div id="transfers-container">
+                    <p class="text-gray-500 text-center py-4">No hay transferencias registradas</p>
+                </div>            </div>
+        </div>
+
+        <!-- Vista de Rendición de Cuentas -->
+        <div id="rendicion-cuentas-view" class="space-y-6" style="display: none;">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <i data-lucide="calculator" class="w-6 h-6 mr-2"></i>
+                Rendición de Cuentas
+            </h2>
+            
+            <!-- Resumen financiero -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <h3 class="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">Cuenta NeuroTEA</h3>
+                    <p class="text-2xl font-bold text-blue-900 dark:text-blue-100" id="rendicion-banco">Gs 0</p>
+                </div>
+                <div class="total-egresos-card">
+                    <h3 class="text-sm font-medium text-red-800 dark:text-red-200 mb-1">Total Egresos</h3>
+                    <p class="text-2xl font-bold text-red-900 dark:text-red-100" id="total-egresos-display">Gs 0</p>
+                </div>
+                <div class="saldo-caja-card">
+                    <h3 class="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-1">Saldo en Caja</h3>
+                    <p class="text-2xl font-bold text-yellow-900 dark:text-yellow-100" id="rendicion-saldo-caja">Gs 0</p>
+                </div>
+            </div>
+            
+            <!-- Tabla de rendición por terapeuta -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold flex items-center">
+                        <i data-lucide="users" class="w-5 h-5 mr-2"></i>
+                        Rendición por Terapeuta
+                    </h3>
+                    <button id="download-pdf-btn" onclick="generateRendicionPDF()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md flex items-center space-x-2 transition-colors">
+                        <i data-lucide="download" class="w-4 h-4"></i>
+                        <span>Descargar PDF</span>
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full border-collapse border border-gray-300 dark:border-gray-600 text-sm">
+                        <thead>
+                            <tr class="bg-gray-50 dark:bg-gray-700">
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-left">TERAPEUTA</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">INGRESO TOTAL</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">APORTE NEUROTEA</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">HONORARIOS</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">TRANSFERENCIA A TERAPEUTA</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">ADELANTOS RECIBIDOS</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">NEUROTEA LE DEBE DAR</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">TERAPEUTA DEBE TRANSFERIR</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">ESTADO</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">ACCIÓN</th>
+                                <th class="border border-gray-300 dark:border-gray-600 px-2 py-2 text-center">COMPROB.</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rendicion-therapist-table-body">
+                            <tr>
+                                <td colspan="11" class="text-center py-4 text-gray-500">No hay datos para mostrar</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista de Egresos -->
+        <div id="egresos-view" class="space-y-6" style="display: none;">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <i data-lucide="minus-circle" class="w-6 h-6 mr-2"></i>
+                Gestión de Egresos
+            </h2>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Formulario de egresos -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i>
+                        Registrar Egreso
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="egreso-type">Tipo de Egreso</label>
+                            <select id="egreso-type" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                                <option value="">Seleccionar tipo</option>
+                                <option value="neurotea">Gasto de NeuroTEA</option>
+                                <option value="adelanto">Adelanto a Terapeuta</option>
+                            </select>
+                        </div>
+                        
+                        <div id="egreso-therapist-container" style="display: none;">
+                            <label class="block text-sm font-medium mb-1" for="egreso-therapist-select">Terapeuta</label>
+                            <select id="egreso-therapist-select" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                                <option value="">Seleccionar terapeuta</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="egreso-concept">Concepto</label>
+                            <input type="text" id="egreso-concept" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="Descripción del egreso">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="egreso-value">Monto</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400">Gs</span>
+                                <input type="number" id="egreso-value" class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="0">
+                            </div>
+                        </div>
+                        
+                        <button id="add-egreso-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-md">
+                            Registrar Egreso
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Lista de egresos -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold flex items-center">
+                            <i data-lucide="list" class="w-5 h-5 mr-2"></i>
+                            Egresos del Día
+                        </h3>
+                        <button id="clear-egresos-btn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-md text-sm">
+                            Limpiar Egresos del Día
+                        </button>
+                    </div>
+                    <div id="egresos-list-container" class="space-y-3">
+                        <p class="text-gray-500 text-center py-4">No hay egresos registrados para este día</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista de Gestión de Terapeutas -->
+        <div id="therapist-management-view" class="space-y-6" style="display: none;">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <i data-lucide="users" class="w-6 h-6 mr-2"></i>
+                Gestión de Terapeutas
+            </h2>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Formulario para agregar terapeuta -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <i data-lucide="user-plus" class="w-5 h-5 mr-2"></i>
+                        Agregar Nueva Terapeuta
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="new-therapist-name">Nombre Completo</label>
+                            <input type="text" id="new-therapist-name" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="Ej: Lic. María González">
+                        </div>
+                        
+                        <button id="add-therapist-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-md">
+                            Agregar Terapeuta
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Lista de terapeutas -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold flex items-center">
+                            <i data-lucide="list" class="w-5 h-5 mr-2"></i>
+                            Terapeutas Registradas
+                        </h3>
+                        <div class="text-sm text-gray-500 dark:text-gray-400" id="therapist-counter">0 terapeutas disponibles</div>
+                    </div>
+                    <div id="therapist-list-container" class="space-y-3">
+                        <p class="text-gray-500 text-center py-4">No hay terapeutas registradas</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vista de Paquetes -->
+        <div id="paquetes-view" class="space-y-6" style="display: none;">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <i data-lucide="package" class="w-6 h-6 mr-2"></i>
+                Gestión de Paquetes / Créditos
+            </h2>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Formulario crear paquete -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i>
+                        Crear Nuevo Paquete
+                    </h3>
+                    
+                    <form id="package-form" class="space-y-4">
+                        <!-- Nombre del Paciente -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="package-patient-name">Nombre del Paciente</label>
+                            <input type="text" id="package-patient-name" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="Ej: Lucía García" required>
+                        </div>
+                        
+                        <!-- Terapeuta -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="package-therapist">Terapeuta</label>
+                            <select id="package-therapist" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" required>
+                                <option value="">Seleccionar terapeuta</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Cantidad de Sesiones -->
+                        <div>
+                            <label class="block text-sm font-medium mb-1" for="package-sessions">Cantidad de Sesiones</label>
+                            <input type="number" id="package-sessions" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="Ej: 5" min="1" max="50" required>
+                        </div>
+                        
+                        <!-- Desglose del Pago -->
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Desglose del Pago</label>
+                            
+                            <!-- Efectivo a NeuroTEA -->
+                            <div class="mb-3">
+                                <label class="label-efectivo block text-sm font-medium mb-1" for="package-cash">Efectivo a NeuroTEA (Caja)</label>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">Gs</span>
+                                    <input type="number" id="package-cash" class="campo-efectivo w-full p-2 pl-8 border rounded-md" placeholder="0">
+                                </div>
+                            </div>
+                            
+                            <!-- Transferencia a Terapeuta -->
+                            <div class="mb-3">
+                                <label class="label-transferencia-terapeuta block text-sm font-medium mb-1" for="package-transfer-therapist">Transferencia a Terapeuta</label>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">Gs</span>
+                                    <input type="number" id="package-transfer-therapist" class="campo-transferencia-terapeuta w-full p-2 pl-8 border rounded-md" placeholder="0">
+                                </div>
+                            </div>
+                            
+                            <!-- Transferencia a NeuroTEA -->
+                            <div class="mb-3">
+                                <label class="label-transferencia-neurotea block text-sm font-medium mb-1" for="package-transfer-neurotea">Transferencia a NeuroTEA</label>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">Gs</span>
+                                    <input type="number" id="package-transfer-neurotea" class="campo-transferencia-neurotea w-full p-2 pl-8 border rounded-md" placeholder="0">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Aporte a NeuroTEA -->
+                        <div>
+                            <label class="block text-sm font-medium mb-2">
+                                <span class="text-blue-600 dark:text-blue-400">🏥</span> Aporte a NeuroTEA
+                            </label>
+                            <div class="space-y-2">
+                                <div class="flex items-center">
+                                    <input type="radio" id="package-contribution-20" name="package-neurotea-contribution" value="20" checked class="mr-2">
+                                    <label for="package-contribution-20">20% (calculado automáticamente)</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input type="radio" id="package-contribution-30" name="package-neurotea-contribution" value="30" class="mr-2">
+                                    <label for="package-contribution-30">30% (calculado automáticamente)</label>
+                                </div>
+                                <div class="flex items-center">
+                                    <input type="radio" id="package-contribution-fixed" name="package-neurotea-contribution" value="fixed" class="mr-2">
+                                    <label for="package-contribution-fixed">Monto Fijo</label>
+                                </div>
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">Gs</span>
+                                    <input type="number" placeholder="Ingrese monto fijo" id="package-fixed-amount-input" disabled class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Totales Calculados -->
+                        <div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm font-medium">Total del Paquete:</span>
+                                <span id="package-total" class="text-lg font-bold text-blue-600 dark:text-blue-400">Gs 0</span>
+                            </div>
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm text-gray-600 dark:text-gray-400">Aporte NeuroTEA <span id="package-aporte-percentage"></span>:</span>
+                                <span id="package-aporte-neurotea" class="text-sm font-medium text-orange-600">Gs 0</span>
+                            </div>
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm text-gray-600 dark:text-gray-400">Honorarios Terapeuta:</span>
+                                <span id="package-honorarios-terapeuta" class="text-sm font-medium text-green-600">Gs 0</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-sm text-gray-600 dark:text-gray-400">Valor por Sesión:</span>
+                                <span id="package-per-session" class="text-sm font-medium">Gs 0</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Botón Crear -->
+                        <button type="submit" id="create-package-btn" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed" disabled>
+                            <i data-lucide="package-plus" class="w-4 h-4 inline mr-2"></i>
+                            Crear Paquete
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Lista paquetes activos -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-semibold flex items-center">
+                            <i data-lucide="list-checks" class="w-5 h-5 mr-2"></i>
+                            Paquetes / Créditos Activos
+                        </h3>
+                        <div class="text-sm text-gray-500 dark:text-gray-400" id="active-packages-counter">0 paquetes activos</div>
+                    </div>
+                    
+                    <div id="active-packages-container" class="space-y-4">
+                        <p class="text-gray-500 text-center py-8">No hay paquetes activos</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal de Saldo Inicial -->
+    <div id="saldo-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+                <div class="flex justify-between items-center p-6 border-b dark:border-gray-700">
+                    <h3 class="text-lg font-semibold flex items-center">
+                        <i data-lucide="coins" class="w-5 h-5 mr-2"></i>
+                        Saldo Inicial de Caja
+                    </h3>
+                    <button onclick="closeSaldoModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                
+                <div class="p-6">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">Saldo actual:</label>
+                        <div class="flex items-center space-x-3">
+                            <div class="flex items-center">
+                                <span class="text-sm text-gray-500 mr-2">Gs</span>
+                                <span id="saldo-actual-display" class="text-lg font-semibold">0</span>
+                            </div>
+                            <span id="saldo-status-text" class="badge badge-secondary">Sin definir</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Modo edición -->
+                    <div id="saldo-edit-section" class="hidden">
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1">Nuevo saldo inicial:</label>
+                            <div class="relative">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">Gs</span>
+                                <input type="number" id="nuevo-saldo-input" class="w-full p-2 pl-8 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="0">
+                            </div>
+                        </div>
+                        
+                        <div class="flex space-x-2 mb-4">
+                            <button onclick="saveSaldoInicial()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md text-sm">
+                                <i data-lucide="check" class="w-4 h-4 inline mr-1"></i>
+                                Guardar
+                            </button>
+                            <button onclick="toggleEditMode()" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-md text-sm">
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Botones de acción -->
+                    <div id="saldo-action-buttons" class="flex space-x-2 mb-4">
+                        <button onclick="toggleEditMode()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md text-sm">
+                            <i data-lucide="edit" class="w-4 h-4 inline mr-1"></i>
+                            Editar
+                        </button>
+                        <button onclick="clearHistorialSaldo()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-md text-sm">
+                            <i data-lucide="history" class="w-4 h-4 inline mr-1"></i>
+                            Limpiar
+                        </button>
+                    </div>
+                    
+                    <!-- Historial -->
+                    <div class="border-t dark:border-gray-700 pt-4">
+                        <button onclick="toggleHistorial()" class="flex items-center justify-between w-full text-left text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100">
+                            <span class="flex items-center">
+                                <i data-lucide="history" class="w-4 h-4 mr-2"></i>
+                                Ver historial de cambios
+                            </span>
+                            <div class="flex items-center">
+                                <span id="historial-counter" class="badge badge-info mr-2">0</span>
+                                <i data-lucide="chevron-down" class="w-4 h-4" id="historial-chevron"></i>
+                            </div>
+                        </button>
+                        
+                        <div id="historial-content" class="hidden mt-3 max-h-40 overflow-y-auto">
+                            <div id="historial-list" class="space-y-2">
+                                <p class="text-sm text-gray-500 text-center py-2">No hay cambios registrados</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end p-6 border-t dark:border-gray-700">
+                    <button onclick="closeSaldoModal()" class="bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded-md">
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vista de Administración -->
+    <div id="administracion-view" class="space-y-6" style="display: none;">
+        <h2 class="text-2xl font-bold mb-6 flex items-center">
+            <i data-lucide="settings" class="w-6 h-6 mr-2"></i>
+            Administración del Sistema
+        </h2>
+        
+        <!-- Navegación de Módulos Internos -->
+        <div class="admin-module-navigation">
+            <div class="flex space-x-2 border-b">
+                <button class="admin-module-tab active" onclick="switchAdminModule('gestion-datos')">
+                    <i data-lucide="database" class="w-4 h-4 mr-2"></i>
+                    📊 Gestión de Datos
+                </button>
+                <button class="admin-module-tab disabled" onclick="switchAdminModule('analisis-financiero')">
+                    <i data-lucide="trending-up" class="w-4 h-4 mr-2"></i>
+                    💰 Análisis Financiero
+                    <span class="text-xs text-gray-500 ml-1">(Próximamente)</span>
+                </button>
+                <button class="admin-module-tab disabled" onclick="switchAdminModule('reportes-avanzados')">
+                    <i data-lucide="file-text" class="w-4 h-4 mr-2"></i>
+                    📈 Reportes Avanzados
+                    <span class="text-xs text-gray-500 ml-1">(Próximamente)</span>
+                </button>
+                <button class="admin-module-tab disabled" onclick="switchAdminModule('configuracion')">
+                    <i data-lucide="cog" class="w-4 h-4 mr-2"></i>
+                    ⚙️ Configuración
+                    <span class="text-xs text-gray-500 ml-1">(Próximamente)</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Contenido del Módulo Gestión de Datos -->
+        <div id="gestion-datos-module" class="admin-module-content">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                <!-- Sección Exportar/Importar Día -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <i data-lucide="calendar" class="w-5 h-5 mr-2"></i>
+                        📅 Gestión del Día
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <!-- Exportar Día -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-medium mb-2 flex items-center">
+                                <i data-lucide="download" class="w-4 h-4 mr-2"></i>
+                                📤 Exportar Datos del Día
+                            </h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                Exporta todas las sesiones, egresos y configuraciones de un día específico.
+                            </p>
+                            <div class="flex items-center space-x-2">
+                                <input type="date" id="export-date" class="border rounded px-3 py-2 text-sm">
+                                <button onclick="exportDayData()" class="btn-export">
+                                    📤 Exportar
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Importar Día -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-medium mb-2 flex items-center">
+                                <i data-lucide="upload" class="w-4 h-4 mr-2"></i>
+                                📥 Importar Datos del Día
+                            </h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                Importa datos de un día desde archivo JSON. <strong>Requiere contraseña.</strong>
+                            </p>
+                            <div class="space-y-2">
+                                <input type="file" id="import-day-file" accept=".json" class="border rounded px-3 py-2 text-sm w-full">
+                                <button onclick="importDayData()" class="btn-import">
+                                    📥 Importar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Sección Backup Completo -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <i data-lucide="hard-drive" class="w-5 h-5 mr-2"></i>
+                        💾 Backup Completo
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <!-- Crear Backup -->
+                        <div class="border rounded-lg p-4">
+                            <h4 class="font-medium mb-2 flex items-center">
+                                <i data-lucide="download" class="w-4 h-4 mr-2"></i>
+                                💾 Crear Backup
+                            </h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                Crea una copia de seguridad completa de todos los datos históricos del sistema.
+                            </p>
+                            <button onclick="createFullBackup()" class="btn-backup">
+                                💾 Crear Backup
+                            </button>
+                        </div>
+                        
+                        <!-- Restaurar Backup -->
+                        <div class="border rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
+                            <h4 class="font-medium mb-2 flex items-center text-red-700 dark:text-red-400">
+                                <i data-lucide="alert-triangle" class="w-4 h-4 mr-2"></i>
+                                ⚠️ Restaurar Backup
+                            </h4>
+                            <p class="text-sm text-red-600 dark:text-red-400 mb-3">
+                                <strong>OPERACIÓN DESTRUCTIVA:</strong> Reemplaza TODOS los datos actuales. 
+                                Requiere contraseña y múltiples confirmaciones.
+                            </p>
+                            <div class="space-y-2">
+                                <input type="file" id="restore-backup-file" accept=".json" class="border rounded px-3 py-2 text-sm w-full">
+                                <button onclick="importFullBackup()" class="btn-restore">
+                                    ⚠️ Restaurar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Información del Sistema -->
+            <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mt-6">
+                <h4 class="font-medium mb-2">📊 Información del Sistema</h4>
+                <div id="system-info" class="text-sm text-gray-600 dark:text-gray-400">
+                    <p>Cargando información del sistema...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Placeholders para módulos futuros -->
+        <div id="analisis-financiero-module" class="admin-module-content hidden">
+            <div class="text-center py-8">
+                <i data-lucide="trending-up" class="w-16 h-16 mx-auto text-gray-400 mb-4"></i>
+                <h3 class="text-lg font-semibold text-gray-600">Análisis Financiero</h3>
+                <p class="text-gray-500">Esta funcionalidad estará disponible en una futura actualización.</p>
+            </div>
+        </div>
+        
+        <div id="reportes-avanzados-module" class="admin-module-content hidden">
+            <div class="text-center py-8">
+                <i data-lucide="file-text" class="w-16 h-16 mx-auto text-gray-400 mb-4"></i>
+                <h3 class="text-lg font-semibold text-gray-600">Reportes Avanzados</h3>
+                <p class="text-gray-500">Esta funcionalidad estará disponible en una futura actualización.</p>
+            </div>
+        </div>
+        
+        <div id="configuracion-module" class="admin-module-content hidden">
+            <div class="text-center py-8">
+                <i data-lucide="cog" class="w-16 h-16 mx-auto text-gray-400 mb-4"></i>
+                <h3 class="text-lg font-semibold text-gray-600">Configuración</h3>
+                <p class="text-gray-500">Esta funcionalidad estará disponible en una futura actualización.</p>
+            </div>
+        </div>
+    </div>
+    <!-- FIN de vista de administración -->
+
+    <script src="neurotea-app_FIXED.js"></script>
+</body>
+</html>
+
+

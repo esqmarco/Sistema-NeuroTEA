@@ -1411,17 +1411,14 @@
                     <!-- Agregar Niño -->
                     <div class="mb-4 border rounded-lg p-4 bg-gray-50 dark:bg-gray-700">
                         <h4 class="font-medium mb-3">Agregar Niño al Grupo</h4>
-                        <div class="grid grid-cols-3 gap-2">
-                            <div>
-                                <label class="block text-xs mb-1">Nombre</label>
+                        <p class="text-xs text-gray-500 mb-2">El monto de cada niño se ingresa al momento de registrar la sesión</p>
+                        <div class="flex gap-2">
+                            <div class="flex-1">
+                                <label class="block text-xs mb-1">Nombre del Niño</label>
                                 <input type="text" id="new-child-name" class="w-full p-2 border rounded-md text-sm dark:bg-gray-600 dark:border-gray-500" placeholder="Nombre del niño">
                             </div>
-                            <div>
-                                <label class="block text-xs mb-1">Monto Acordado (Gs)</label>
-                                <input type="number" id="new-child-amount" class="w-full p-2 border rounded-md text-sm dark:bg-gray-600 dark:border-gray-500" placeholder="150000">
-                            </div>
                             <div class="flex items-end">
-                                <button onclick="addChildToCurrentGroup()" class="w-full bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-md text-sm">
+                                <button onclick="addChildToCurrentGroup()" class="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-md text-sm">
                                     <i data-lucide="user-plus" class="w-4 h-4 inline mr-1"></i>
                                     Agregar
                                 </button>

@@ -35,6 +35,18 @@ let sesionesFuturasTemp = []; // Array temporal para sesiones futuras antes de c
 let transferConfirmationStates = {}; // Estados de confirmación por transferencia
 
 // ===========================
+// VARIABLES GLOBALES - SISTEMA DE SESIONES GRUPALES
+// ===========================
+let groupTherapy = {}; // Configuración de grupos de terapia
+let groupSessions = {}; // Sesiones grupales indexadas por fecha
+let groupTherapyHistory = {}; // Historial de cambios en grupos
+let groupSessionTemp = { // Variables temporales para formulario de sesión grupal
+    groupId: null,
+    attendance: [],
+    therapists: []
+};
+
+// ===========================
 // FUNCIÓN AUXILIAR: Obtener fecha local en formato YYYY-MM-DD
 // ===========================
 function getLocalDateString(date = new Date()) {
@@ -52,7 +64,7 @@ let db = null;
 
 function initIndexedDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('NeuroTEADB', 3);
+        const request = indexedDB.open('NeuroTEADB', 4); // v4: Agregados stores para sesiones grupales
         
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
@@ -125,6 +137,28 @@ function initIndexedDB() {
             // Store para estados de confirmación de transferencias
             if (!db.objectStoreNames.contains('transferConfirmationStates')) {
                 db.createObjectStore('transferConfirmationStates', { keyPath: 'id' });
+            }
+
+            // ===========================
+            // NUEVOS STORES - SISTEMA DE SESIONES GRUPALES
+            // ===========================
+
+            // Store para configuración de grupos de terapia
+            if (!db.objectStoreNames.contains('groupTherapy')) {
+                db.createObjectStore('groupTherapy', { keyPath: 'id' });
+            }
+
+            // Store para sesiones grupales (con fecha para limpieza automática)
+            if (!db.objectStoreNames.contains('groupSessions')) {
+                const groupSessionStore = db.createObjectStore('groupSessions', { keyPath: 'id' });
+                groupSessionStore.createIndex('fecha', 'fecha', { unique: false });
+                groupSessionStore.createIndex('groupId', 'groupId', { unique: false });
+            }
+
+            // Store para historial de cambios en grupos
+            if (!db.objectStoreNames.contains('groupTherapyHistory')) {
+                const historyStore = db.createObjectStore('groupTherapyHistory', { keyPath: 'id', autoIncrement: true });
+                historyStore.createIndex('groupId', 'groupId', { unique: false });
             }
         };
     });
@@ -269,6 +303,54 @@ async function clearPackagesByDate(fecha) {
             };
         } catch (error) {
             console.error('Error en clearPackagesByDate:', error);
+            resolve(0);
+        }
+    });
+}
+
+/**
+ * Limpia todas las sesiones grupales de una fecha específica en IndexedDB
+ * @param {string} fecha - Fecha en formato YYYY-MM-DD
+ * @returns {Promise<number>} Cantidad de registros eliminados
+ */
+async function clearGroupSessionsByDate(fecha) {
+    return new Promise((resolve, reject) => {
+        if (!db) {
+            resolve(0);
+            return;
+        }
+
+        try {
+            const transaction = db.transaction(['groupSessions'], 'readwrite');
+            const store = transaction.objectStore('groupSessions');
+            const index = store.index('fecha');
+
+            let deletedCount = 0;
+            const range = IDBKeyRange.only(fecha);
+            const request = index.openCursor(range);
+
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    store.delete(cursor.primaryKey);
+                    deletedCount++;
+                    cursor.continue();
+                }
+            };
+
+            transaction.oncomplete = () => {
+                if (deletedCount > 0) {
+                    console.log(`🧹 Sesiones grupales eliminadas de ${fecha}: ${deletedCount}`);
+                }
+                resolve(deletedCount);
+            };
+
+            transaction.onerror = () => {
+                console.error('Error al limpiar sesiones grupales:', transaction.error);
+                resolve(0);
+            };
+        } catch (error) {
+            console.error('Error en clearGroupSessionsByDate:', error);
             resolve(0);
         }
     });
@@ -434,6 +516,1066 @@ function deleteSingleEgresoFromIndexedDB(egresoId) {
 }
 
 // ===========================
+// SISTEMA DE SESIONES GRUPALES - CRUD DE GRUPOS
+// ===========================
+
+/**
+ * Crea un nuevo grupo con numeración automática
+ * @returns {string} ID del grupo creado
+ */
+function createGroup() {
+    // Calcular siguiente número de grupo
+    const existingNumbers = Object.keys(groupTherapy)
+        .map(id => parseInt(id.replace('grupo-', '')))
+        .filter(n => !isNaN(n));
+    const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
+
+    const groupId = `grupo-${nextNumber}`;
+
+    groupTherapy[groupId] = {
+        id: groupId,
+        name: `Grupo ${nextNumber}`,
+        children: [],
+        totalMaxValue: 0,
+        createdAt: fechaActual,
+        status: 'active'
+    };
+
+    // Registrar en historial
+    addToGroupHistory(groupId, 'create', {});
+
+    // Log de auditoría
+    logGroupOperation('group_create', {
+        groupId: groupId,
+        groupName: `Grupo ${nextNumber}`
+    });
+
+    saveGroupTherapyToStorage();
+    return groupId;
+}
+
+/**
+ * Agrega un niño a un grupo existente
+ * @param {string} groupId - ID del grupo
+ * @param {string} childName - Nombre del niño
+ * @param {number} amount - Monto acordado
+ */
+function addChildToGroup(groupId, childName, amount) {
+    if (!groupTherapy[groupId]) {
+        console.error('Grupo no encontrado:', groupId);
+        return false;
+    }
+
+    childName = childName.trim();
+    amount = parseNumber(amount);
+
+    // Validaciones
+    if (!childName) {
+        alert('El nombre del niño es requerido');
+        return false;
+    }
+
+    if (amount <= 0) {
+        alert('El monto debe ser mayor a 0');
+        return false;
+    }
+
+    // Verificar duplicados
+    const exists = groupTherapy[groupId].children.some(
+        c => c.name.toLowerCase() === childName.toLowerCase()
+    );
+    if (exists) {
+        alert('Este niño ya está en el grupo');
+        return false;
+    }
+
+    const childId = `child-${Date.now()}`;
+
+    groupTherapy[groupId].children.push({
+        id: childId,
+        name: childName,
+        amount: amount
+    });
+
+    // Recalcular total máximo
+    groupTherapy[groupId].totalMaxValue = groupTherapy[groupId].children
+        .reduce((sum, child) => sum + child.amount, 0);
+
+    // Registrar en historial
+    addToGroupHistory(groupId, 'add_child', {
+        childName: childName,
+        amount: amount
+    });
+
+    // Log de auditoría
+    logGroupOperation('add_child', {
+        groupId: groupId,
+        childId: childId,
+        childName: childName,
+        amount: amount
+    });
+
+    saveGroupTherapyToStorage();
+    return true;
+}
+
+/**
+ * Elimina un niño de un grupo
+ * @param {string} groupId - ID del grupo
+ * @param {string} childId - ID del niño
+ */
+function removeChildFromGroup(groupId, childId) {
+    if (!groupTherapy[groupId]) return false;
+
+    const child = groupTherapy[groupId].children.find(c => c.id === childId);
+    if (!child) return false;
+
+    // Confirmar eliminación
+    if (!confirm(`¿Está seguro de eliminar a ${child.name} del grupo?`)) {
+        return false;
+    }
+
+    // Registrar en historial ANTES de eliminar
+    addToGroupHistory(groupId, 'remove_child', {
+        childName: child.name,
+        amount: child.amount
+    });
+
+    groupTherapy[groupId].children = groupTherapy[groupId].children
+        .filter(c => c.id !== childId);
+
+    // Recalcular total máximo
+    groupTherapy[groupId].totalMaxValue = groupTherapy[groupId].children
+        .reduce((sum, c) => sum + c.amount, 0);
+
+    // Log de auditoría
+    logGroupOperation('remove_child', {
+        groupId: groupId,
+        childId: childId,
+        childName: child.name
+    });
+
+    saveGroupTherapyToStorage();
+    renderGroupList();
+    return true;
+}
+
+/**
+ * Edita el monto de un niño en un grupo
+ * @param {string} groupId - ID del grupo
+ * @param {string} childId - ID del niño
+ * @param {number} newAmount - Nuevo monto
+ */
+function editChildInGroup(groupId, childId, newAmount) {
+    if (!groupTherapy[groupId]) return false;
+
+    const child = groupTherapy[groupId].children.find(c => c.id === childId);
+    if (!child) return false;
+
+    const oldAmount = child.amount;
+    newAmount = parseNumber(newAmount);
+
+    if (oldAmount === newAmount) return true; // Sin cambios
+
+    // Registrar en historial
+    addToGroupHistory(groupId, 'edit_child', {
+        childName: child.name,
+        oldAmount: oldAmount,
+        newAmount: newAmount
+    });
+
+    // Actualizar monto
+    child.amount = newAmount;
+
+    // Recalcular total máximo
+    groupTherapy[groupId].totalMaxValue = groupTherapy[groupId].children
+        .reduce((sum, c) => sum + c.amount, 0);
+
+    // Log de auditoría
+    logGroupOperation('edit_child', {
+        groupId: groupId,
+        childId: childId,
+        childName: child.name,
+        oldAmount: oldAmount,
+        newAmount: newAmount
+    });
+
+    saveGroupTherapyToStorage();
+    return true;
+}
+
+/**
+ * Elimina un grupo (soft delete si tiene sesiones)
+ * @param {string} groupId - ID del grupo
+ */
+function deleteGroup(groupId) {
+    if (!groupTherapy[groupId]) return false;
+
+    const group = groupTherapy[groupId];
+
+    // Verificar si tiene sesiones registradas
+    const hasActiveSessions = Object.values(groupSessions)
+        .flat()
+        .some(session => session.groupId === groupId);
+
+    if (hasActiveSessions) {
+        // Soft delete - solo marcar como inactivo
+        if (!confirm(`El ${group.name} tiene sesiones registradas. ¿Desea marcarlo como inactivo? (No se eliminará, solo se ocultará)`)) {
+            return false;
+        }
+
+        groupTherapy[groupId].status = 'inactive';
+
+        addToGroupHistory(groupId, 'deactivate', {});
+        logGroupOperation('group_deactivate', { groupId: groupId, groupName: group.name });
+
+    } else {
+        // Eliminación real
+        if (!confirm(`¿Está seguro de eliminar ${group.name}? Esta acción no se puede deshacer.`)) {
+            return false;
+        }
+
+        addToGroupHistory(groupId, 'delete', {});
+        logGroupOperation('group_delete', { groupId: groupId, groupName: group.name });
+
+        delete groupTherapy[groupId];
+    }
+
+    saveGroupTherapyToStorage();
+    renderGroupList();
+    return true;
+}
+
+/**
+ * Obtiene todos los grupos activos
+ * @returns {Array} Lista de grupos activos
+ */
+function getActiveGroups() {
+    return Object.values(groupTherapy)
+        .filter(group => group.status === 'active')
+        .sort((a, b) => {
+            const numA = parseInt(a.id.replace('grupo-', ''));
+            const numB = parseInt(b.id.replace('grupo-', ''));
+            return numA - numB;
+        });
+}
+
+/**
+ * Guarda la configuración de grupos en IndexedDB
+ */
+async function saveGroupTherapyToStorage() {
+    try {
+        const groupData = Object.values(groupTherapy);
+        await saveToIndexedDB('groupTherapy', groupData);
+        console.log('✅ Grupos guardados:', groupData.length);
+    } catch (error) {
+        console.error('❌ Error guardando grupos:', error);
+    }
+}
+
+// ===========================
+// SISTEMA DE SESIONES GRUPALES - REGISTRO DE SESIONES
+// ===========================
+
+/**
+ * Inicializa el formulario de sesión grupal al seleccionar un grupo
+ * @param {string} groupId - ID del grupo seleccionado
+ */
+function initGroupSessionForm(groupId) {
+    if (!groupId) {
+        // Limpiar formulario si no hay grupo seleccionado
+        groupSessionTemp = { groupId: null, attendance: [], therapists: [] };
+        renderGroupAttendanceList();
+        renderGroupTherapistsList();
+        calculateGroupSessionValues();
+        return;
+    }
+
+    if (!groupTherapy[groupId]) {
+        console.error('Grupo no encontrado:', groupId);
+        return;
+    }
+
+    const group = groupTherapy[groupId];
+
+    // Inicializar datos temporales
+    groupSessionTemp.groupId = groupId;
+    groupSessionTemp.attendance = group.children.map(child => ({
+        ...child,
+        present: true  // Por defecto todos presentes
+    }));
+    groupSessionTemp.therapists = [];
+
+    // Renderizar lista de asistencia
+    renderGroupAttendanceList();
+    renderGroupTherapistsList();
+
+    // Actualizar cálculos
+    calculateGroupSessionValues();
+}
+
+/**
+ * Renderiza la lista de niños con checkbox de asistencia
+ */
+function renderGroupAttendanceList() {
+    const container = document.getElementById('group-attendance-list');
+    if (!container) return;
+
+    if (groupSessionTemp.attendance.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm italic">Seleccione un grupo primero</p>';
+        return;
+    }
+
+    container.innerHTML = groupSessionTemp.attendance.map((child, index) => `
+        <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded mb-2">
+            <div class="flex-1">
+                <span class="font-medium">${child.name}</span>
+                <span class="text-gray-500 ml-2">Gs ${formatNumber(child.amount)}</span>
+            </div>
+            <select
+                id="attendance-${index}"
+                onchange="updateChildAttendance(${index}, this.value)"
+                class="p-1 border rounded text-sm ${child.present ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}">
+                <option value="true" ${child.present ? 'selected' : ''}>Presente</option>
+                <option value="false" ${!child.present ? 'selected' : ''}>Ausente</option>
+            </select>
+        </div>
+    `).join('');
+}
+
+/**
+ * Actualiza el estado de asistencia de un niño
+ * @param {number} index - Índice del niño en el array
+ * @param {string} value - 'true' o 'false'
+ */
+function updateChildAttendance(index, value) {
+    groupSessionTemp.attendance[index].present = value === 'true';
+
+    // Actualizar estilo visual del select
+    const select = document.getElementById(`attendance-${index}`);
+    if (select) {
+        if (value === 'true') {
+            select.className = 'p-1 border rounded text-sm bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        } else {
+            select.className = 'p-1 border rounded text-sm bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+        }
+    }
+
+    // Recalcular valores
+    calculateGroupSessionValues();
+}
+
+/**
+ * Agrega una terapeuta a la sesión grupal
+ */
+function addTherapistToGroupSession() {
+    const select = document.getElementById('group-therapist-select');
+    const therapistName = select.value;
+
+    if (!therapistName) {
+        alert('Seleccione una terapeuta');
+        return;
+    }
+
+    if (groupSessionTemp.therapists.includes(therapistName)) {
+        alert('Esta terapeuta ya fue agregada');
+        return;
+    }
+
+    groupSessionTemp.therapists.push(therapistName);
+    select.value = '';
+
+    renderGroupTherapistsList();
+    calculateGroupSessionValues();
+}
+
+/**
+ * Elimina una terapeuta de la sesión grupal
+ * @param {number} index - Índice de la terapeuta
+ */
+function removeTherapistFromGroupSession(index) {
+    groupSessionTemp.therapists.splice(index, 1);
+    renderGroupTherapistsList();
+    calculateGroupSessionValues();
+}
+
+/**
+ * Renderiza la lista de terapeutas asignadas
+ */
+function renderGroupTherapistsList() {
+    const container = document.getElementById('group-therapists-list');
+    if (!container) return;
+
+    if (groupSessionTemp.therapists.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm italic">No hay terapeutas asignadas</p>';
+        return;
+    }
+
+    container.innerHTML = groupSessionTemp.therapists.map((name, index) => `
+        <div class="flex items-center justify-between p-2 bg-purple-50 dark:bg-purple-900/20 rounded mb-2">
+            <span class="font-medium">${name}</span>
+            <button
+                onclick="removeTherapistFromGroupSession(${index})"
+                class="text-red-500 hover:text-red-700 p-1">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+        </div>
+    `).join('');
+
+    // Reinicializar iconos Lucide
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+}
+
+/**
+ * Calcula los valores de la sesión grupal
+ * @returns {Object} Valores calculados
+ */
+function calculateGroupSessionValues() {
+    // Contar presentes y calcular total
+    const presentChildren = groupSessionTemp.attendance.filter(child => child.present);
+    const presentCount = presentChildren.length;
+    const totalValue = presentChildren.reduce((sum, child) => sum + child.amount, 0);
+
+    // Obtener tipo de aporte
+    const contributionTypeRadio = document.querySelector('input[name="group-contribution"]:checked');
+    const contributionType = contributionTypeRadio ? contributionTypeRadio.value : '30';
+
+    // Calcular aporte a NeuroTEA
+    let neuroteaContribution = 0;
+    if (contributionType === 'fixed') {
+        neuroteaContribution = parseNumber(document.getElementById('group-fixed-amount')?.value || 0);
+    } else {
+        const percentage = parseFloat(contributionType) || 30;
+        neuroteaContribution = Math.round(totalValue * (percentage / 100));
+    }
+
+    // Calcular honorarios
+    const totalFee = Math.max(0, totalValue - neuroteaContribution);
+    const therapistCount = groupSessionTemp.therapists.length;
+    const feePerTherapist = therapistCount > 0 ? Math.round(totalFee / therapistCount) : 0;
+
+    // Actualizar displays
+    const displays = {
+        'group-present-count': `${presentCount} presentes`,
+        'group-total-value': formatCurrency(totalValue),
+        'group-total-value-summary': formatCurrency(totalValue),
+        'group-neurotea-contribution': formatCurrency(neuroteaContribution),
+        'group-total-fee': formatCurrency(totalFee),
+        'group-therapist-count': therapistCount > 0 ? `÷${therapistCount}` : '-',
+        'group-fee-per-therapist': therapistCount > 0 ? formatCurrency(feePerTherapist) : 'Gs 0'
+    };
+
+    Object.entries(displays).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = value;
+    });
+
+    // Validar botón de registro
+    validateGroupSessionButton();
+
+    return {
+        presentCount,
+        totalValue,
+        contributionType,
+        neuroteaContribution,
+        totalFee,
+        therapistCount,
+        feePerTherapist
+    };
+}
+
+/**
+ * Valida si se puede registrar la sesión grupal
+ */
+function validateGroupSessionButton() {
+    const btn = document.getElementById('register-group-session-btn');
+    if (!btn) return;
+
+    const hasGroup = groupSessionTemp.groupId !== null;
+    const hasPresent = groupSessionTemp.attendance.some(child => child.present);
+    const hasTherapists = groupSessionTemp.therapists.length > 0;
+    const hasPayment = (parseNumber(document.getElementById('group-cash')?.value || 0) +
+                       parseNumber(document.getElementById('group-transfer')?.value || 0)) > 0;
+
+    const isValid = hasGroup && hasPresent && hasTherapists && hasPayment;
+
+    btn.disabled = !isValid;
+    btn.className = isValid
+        ? 'w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition'
+        : 'w-full bg-gray-400 cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg';
+}
+
+/**
+ * Registra la sesión grupal
+ */
+function registerGroupSession() {
+    // Validaciones
+    if (!groupSessionTemp.groupId) {
+        alert('Debe seleccionar un grupo');
+        return;
+    }
+
+    const presentChildren = groupSessionTemp.attendance.filter(child => child.present);
+    if (presentChildren.length === 0) {
+        alert('Debe haber al menos un niño presente');
+        return;
+    }
+
+    if (groupSessionTemp.therapists.length === 0) {
+        alert('Debe asignar al menos una terapeuta');
+        return;
+    }
+
+    // Obtener valores de pago
+    const cashToNeurotea = parseNumber(document.getElementById('group-cash')?.value || 0);
+    const transferToNeurotea = parseNumber(document.getElementById('group-transfer')?.value || 0);
+
+    if (cashToNeurotea + transferToNeurotea <= 0) {
+        alert('Debe ingresar el desglose del pago');
+        return;
+    }
+
+    // Calcular valores finales
+    const values = calculateGroupSessionValues();
+
+    // Verificar que el pago coincida con el total
+    const totalPago = cashToNeurotea + transferToNeurotea;
+    if (totalPago !== values.totalValue) {
+        if (!confirm(`El pago (Gs ${formatNumber(totalPago)}) no coincide con el total de presentes (Gs ${formatNumber(values.totalValue)}). ¿Desea continuar?`)) {
+            return;
+        }
+    }
+
+    // Crear objeto de sesión grupal
+    const fecha = document.getElementById('session-date')?.value || fechaActual;
+    const group = groupTherapy[groupSessionTemp.groupId];
+
+    const groupSession = {
+        id: Date.now(),
+        fecha: fecha,
+        isGroupSession: true,
+
+        groupId: groupSessionTemp.groupId,
+        groupName: group.name,
+
+        attendance: [...groupSessionTemp.attendance],
+
+        therapists: [...groupSessionTemp.therapists],
+        therapistCount: groupSessionTemp.therapists.length,
+
+        presentCount: values.presentCount,
+        totalValue: values.totalValue,
+
+        contributionType: values.contributionType,
+        neuroteaContribution: values.neuroteaContribution,
+
+        totalFee: values.totalFee,
+        feePerTherapist: values.feePerTherapist,
+
+        cashToNeurotea: cashToNeurotea,
+        transferToNeurotea: transferToNeurotea,
+        transferToTherapist: 0,
+
+        registeredAt: new Date().toISOString()
+    };
+
+    // Guardar en groupSessions
+    if (!groupSessions[fecha]) {
+        groupSessions[fecha] = [];
+    }
+    groupSessions[fecha].push(groupSession);
+
+    // Log de auditoría
+    logGroupOperation('group_session_register', {
+        sessionId: groupSession.id,
+        groupId: groupSession.groupId,
+        groupName: groupSession.groupName,
+        therapists: groupSession.therapists,
+        presentCount: groupSession.presentCount,
+        totalValue: groupSession.totalValue,
+        feePerTherapist: groupSession.feePerTherapist,
+        fecha: fecha
+    });
+
+    // Guardar en storage
+    saveToStorage();
+
+    // Limpiar formulario
+    clearGroupSessionForm();
+
+    // Actualizar todas las vistas
+    updateAllViews(fecha);
+
+    alert(`Sesión grupal de ${group.name} registrada exitosamente`);
+    console.log('✅ Sesión grupal registrada:', groupSession);
+}
+
+/**
+ * Limpia el formulario de sesión grupal
+ */
+function clearGroupSessionForm() {
+    // Resetear datos temporales
+    groupSessionTemp = {
+        groupId: null,
+        attendance: [],
+        therapists: []
+    };
+
+    // Resetear selects e inputs
+    const groupSelect = document.getElementById('group-select');
+    if (groupSelect) groupSelect.value = '';
+
+    const therapistSelect = document.getElementById('group-therapist-select');
+    if (therapistSelect) therapistSelect.value = '';
+
+    const groupCash = document.getElementById('group-cash');
+    if (groupCash) groupCash.value = '';
+
+    const groupTransfer = document.getElementById('group-transfer');
+    if (groupTransfer) groupTransfer.value = '';
+
+    const groupFixed = document.getElementById('group-fixed-amount');
+    if (groupFixed) groupFixed.value = '';
+
+    // Resetear radio a 30%
+    const radio30 = document.getElementById('group-contribution-30');
+    if (radio30) radio30.checked = true;
+
+    // Resetear displays
+    renderGroupAttendanceList();
+    renderGroupTherapistsList();
+
+    // Volver al modo de registro normal
+    const modoNormal = document.getElementById('modo-pago-dia');
+    if (modoNormal) {
+        modoNormal.checked = true;
+        togglePaymentMode();
+    }
+}
+
+/**
+ * Elimina una sesión grupal
+ * @param {string} fecha - Fecha de la sesión
+ * @param {number} sessionId - ID de la sesión
+ */
+async function deleteGroupSession(fecha, sessionId) {
+    // Confirmar eliminación
+    if (!confirm('¿Está seguro de eliminar esta sesión grupal?')) return;
+
+    // Buscar la sesión
+    if (!groupSessions[fecha]) return;
+
+    const sessionIndex = groupSessions[fecha].findIndex(s => s.id === sessionId);
+    if (sessionIndex === -1) return;
+
+    const session = groupSessions[fecha][sessionIndex];
+
+    console.log(`🗑️ Eliminando sesión grupal: ${session.groupName}`);
+
+    // Log de auditoría
+    logGroupOperation('group_session_delete', {
+        sessionId: sessionId,
+        groupId: session.groupId,
+        groupName: session.groupName,
+        therapists: session.therapists,
+        totalValue: session.totalValue,
+        fecha: fecha
+    });
+
+    // Eliminar de memoria
+    groupSessions[fecha].splice(sessionIndex, 1);
+
+    if (groupSessions[fecha].length === 0) {
+        delete groupSessions[fecha];
+    }
+
+    // Guardar cambios
+    saveToStorage();
+
+    // Actualizar vistas
+    updateAllViews(fecha);
+
+    console.log(`✅ Sesión grupal eliminada.`);
+}
+
+// ===========================
+// SISTEMA DE SESIONES GRUPALES - HISTORIAL Y LOGS
+// ===========================
+
+/**
+ * Agrega entrada al historial de cambios de grupos
+ */
+function addToGroupHistory(groupId, action, details) {
+    if (!groupTherapyHistory[groupId]) {
+        groupTherapyHistory[groupId] = [];
+    }
+
+    const entry = {
+        timestamp: new Date().toISOString(),
+        action: action,
+        details: details,
+        message: generateGroupHistoryMessage(action, details)
+    };
+
+    groupTherapyHistory[groupId].unshift(entry);
+
+    // Limitar a 20 entradas por grupo
+    if (groupTherapyHistory[groupId].length > 20) {
+        groupTherapyHistory[groupId] = groupTherapyHistory[groupId].slice(0, 20);
+    }
+}
+
+/**
+ * Genera mensaje legible para historial de grupos
+ */
+function generateGroupHistoryMessage(action, details) {
+    switch(action) {
+        case 'create':
+            return `Grupo creado`;
+        case 'add_child':
+            return `Se agregó: ${details.childName} (${formatCurrency(details.amount)})`;
+        case 'remove_child':
+            return `Se eliminó: ${details.childName}`;
+        case 'edit_child':
+            return `Se editó ${details.childName}: ${formatCurrency(details.oldAmount)} → ${formatCurrency(details.newAmount)}`;
+        case 'deactivate':
+            return `Grupo marcado como inactivo`;
+        case 'delete':
+            return `Grupo eliminado`;
+        default:
+            return `Cambio registrado`;
+    }
+}
+
+/**
+ * Registra operaciones de sesiones grupales para auditoría
+ */
+function logGroupOperation(operation, data) {
+    const logEntry = {
+        operation: operation,
+        data: data,
+        timestamp: new Date().toISOString()
+    };
+
+    // Guardar en consola para debugging
+    console.log(`📋 GROUP_OP [${operation}]:`, data);
+
+    // Guardar en localStorage para auditoría
+    try {
+        const logs = JSON.parse(localStorage.getItem('neurotea_group_logs') || '[]');
+        logs.unshift(logEntry);
+
+        // Mantener solo últimos 100 logs
+        if (logs.length > 100) {
+            logs.length = 100;
+        }
+
+        localStorage.setItem('neurotea_group_logs', JSON.stringify(logs));
+    } catch (error) {
+        console.error('Error guardando log de grupo:', error);
+    }
+}
+
+// ===========================
+// SISTEMA DE SESIONES GRUPALES - VALIDACIÓN E INTEGRIDAD
+// ===========================
+
+/**
+ * Valida integridad de datos de grupos al cargar
+ */
+function validateGroupTherapyIntegrity() {
+    let corrected = false;
+
+    Object.keys(groupTherapy).forEach(groupId => {
+        const group = groupTherapy[groupId];
+
+        // Validar que tenga estructura correcta
+        if (!group.children) {
+            group.children = [];
+            corrected = true;
+        }
+
+        // Validar que totalMaxValue sea correcto
+        const calculatedTotal = group.children.reduce((sum, child) => sum + (child.amount || 0), 0);
+        if (group.totalMaxValue !== calculatedTotal) {
+            group.totalMaxValue = calculatedTotal;
+            corrected = true;
+            console.warn(`⚠️ Corregido totalMaxValue de ${groupId}`);
+        }
+
+        // Validar status
+        if (!group.status) {
+            group.status = 'active';
+            corrected = true;
+        }
+
+        // Validar que cada niño tenga ID
+        group.children.forEach((child, index) => {
+            if (!child.id) {
+                child.id = `child-${Date.now()}-${index}`;
+                corrected = true;
+            }
+        });
+    });
+
+    // Validar sesiones grupales
+    Object.keys(groupSessions).forEach(fecha => {
+        groupSessions[fecha].forEach(session => {
+            // Validar que el grupo exista
+            if (!groupTherapy[session.groupId]) {
+                console.warn(`⚠️ Sesión grupal huérfana: ${session.id} (grupo ${session.groupId} no existe)`);
+                session._orphaned = true;
+            }
+        });
+    });
+
+    if (corrected) {
+        console.log('✅ Datos de grupos validados y corregidos');
+        saveGroupTherapyToStorage();
+    }
+}
+
+// ===========================
+// SISTEMA DE SESIONES GRUPALES - UI HELPERS
+// ===========================
+
+/**
+ * Llena el select de grupos con los grupos activos
+ */
+function populateGroupSelect() {
+    const select = document.getElementById('group-select');
+    if (!select) return;
+
+    const activeGroups = getActiveGroups();
+
+    select.innerHTML = '<option value="">Seleccionar grupo...</option>' +
+        activeGroups.map(group =>
+            `<option value="${group.id}">${group.name} (${group.children.length} niños)</option>`
+        ).join('');
+}
+
+/**
+ * Llena el select de terapeutas para sesiones grupales
+ */
+function populateGroupTherapistSelect() {
+    const select = document.getElementById('group-therapist-select');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Seleccionar terapeuta...</option>' +
+        therapists.map(name =>
+            `<option value="${name}">${name}</option>`
+        ).join('');
+}
+
+/**
+ * Renderiza la lista de grupos en administración
+ */
+function renderGroupList() {
+    const container = document.getElementById('groups-list-container');
+    if (!container) return;
+
+    const activeGroups = getActiveGroups();
+
+    if (activeGroups.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8 text-gray-500">
+                <p>No hay grupos configurados</p>
+                <p class="text-sm mt-2">Haga clic en "Crear Nuevo Grupo" para comenzar</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = activeGroups.map(group => `
+        <div class="bg-white dark:bg-gray-800 border rounded-lg p-4 mb-4">
+            <div class="flex justify-between items-center mb-3">
+                <h4 class="font-bold text-lg">${group.name}</h4>
+                <div class="flex space-x-2">
+                    <button onclick="openEditGroupModal('${group.id}')"
+                            class="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm">
+                        Editar
+                    </button>
+                    <button onclick="deleteGroup('${group.id}')"
+                            class="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-sm">
+                        Eliminar
+                    </button>
+                </div>
+            </div>
+            <div class="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                ${group.children.length} niños | Total máximo: ${formatCurrency(group.totalMaxValue)}
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                ${group.children.map(child => `
+                    <div class="bg-gray-50 dark:bg-gray-700 p-2 rounded text-sm">
+                        <span class="font-medium">${child.name}</span>
+                        <span class="text-gray-500 ml-2">${formatCurrency(child.amount)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Variables para el modal de edición de grupo
+let currentEditingGroupId = null;
+
+/**
+ * Abre el modal de edición de grupo
+ */
+function openEditGroupModal(groupId) {
+    const modal = document.getElementById('edit-group-modal');
+    if (!modal || !groupTherapy[groupId]) return;
+
+    currentEditingGroupId = groupId;
+    const group = groupTherapy[groupId];
+
+    document.getElementById('edit-group-title').textContent = `Editar ${group.name}`;
+
+    renderEditGroupChildrenList();
+
+    modal.classList.remove('hidden');
+}
+
+/**
+ * Cierra el modal de edición de grupo
+ */
+function closeEditGroupModal() {
+    const modal = document.getElementById('edit-group-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    currentEditingGroupId = null;
+
+    // Limpiar campos
+    document.getElementById('new-child-name').value = '';
+    document.getElementById('new-child-amount').value = '';
+}
+
+/**
+ * Renderiza la lista de niños en el modal de edición
+ */
+function renderEditGroupChildrenList() {
+    const container = document.getElementById('edit-group-children-list');
+    if (!container || !currentEditingGroupId) return;
+
+    const group = groupTherapy[currentEditingGroupId];
+
+    if (group.children.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-sm italic">No hay niños en el grupo</p>';
+        document.getElementById('edit-group-total').textContent = 'Gs 0';
+        return;
+    }
+
+    container.innerHTML = group.children.map(child => `
+        <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded mb-2">
+            <div class="flex-1">
+                <span class="font-medium">${child.name}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <input type="number"
+                       id="child-amount-${child.id}"
+                       value="${child.amount}"
+                       onchange="editChildInGroup('${currentEditingGroupId}', '${child.id}', this.value); renderEditGroupChildrenList();"
+                       class="w-24 p-1 border rounded text-sm text-right dark:bg-gray-600 dark:border-gray-500">
+                <button onclick="removeChildFromGroup('${currentEditingGroupId}', '${child.id}'); renderEditGroupChildrenList();"
+                        class="text-red-500 hover:text-red-700 p-1">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+
+    document.getElementById('edit-group-total').textContent = formatCurrency(group.totalMaxValue);
+
+    // Reinicializar iconos Lucide
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+}
+
+/**
+ * Agrega niño al grupo actualmente en edición
+ */
+function addChildToCurrentGroup() {
+    if (!currentEditingGroupId) return;
+
+    const nameInput = document.getElementById('new-child-name');
+    const amountInput = document.getElementById('new-child-amount');
+
+    const name = nameInput.value.trim();
+    const amount = parseNumber(amountInput.value);
+
+    if (addChildToGroup(currentEditingGroupId, name, amount)) {
+        nameInput.value = '';
+        amountInput.value = '';
+        renderEditGroupChildrenList();
+    }
+}
+
+/**
+ * Abre el modal de gestión de grupos
+ */
+function openGroupManagement() {
+    const modal = document.getElementById('group-management-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        renderGroupList();
+        lucide.createIcons();
+    }
+}
+
+/**
+ * Cierra el modal de gestión de grupos
+ */
+function closeGroupManagementModal() {
+    const modal = document.getElementById('group-management-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+    // Actualizar el select de grupos en el formulario
+    populateGroupSelect();
+}
+
+/**
+ * Guarda los cambios del grupo editado
+ */
+function saveGroupChanges() {
+    const groupId = document.getElementById('edit-group-id').value;
+    const newName = document.getElementById('edit-group-name').value.trim();
+    const newPercentage = parseInt(document.getElementById('edit-group-percentage').value) || 30;
+
+    if (!groupId || !groupTherapy[groupId]) {
+        alert('Error: Grupo no encontrado');
+        return;
+    }
+
+    if (!newName) {
+        alert('Por favor ingrese un nombre para el grupo');
+        return;
+    }
+
+    // Actualizar datos del grupo
+    groupTherapy[groupId].name = newName;
+    groupTherapy[groupId].neuroteaPercentage = newPercentage;
+    groupTherapy[groupId].updatedAt = new Date().toISOString();
+
+    // Guardar en IndexedDB
+    saveGroupTherapyToStorage();
+
+    // Registrar en historial
+    addToGroupHistory(groupId, 'update', {
+        action: 'group_updated',
+        changes: { name: newName, neuroteaPercentage: newPercentage }
+    });
+
+    alert('Grupo actualizado exitosamente');
+    closeEditGroupModal();
+    renderGroupList();
+}
+
+// ===========================
 // UTILIDADES
 // ===========================
 
@@ -453,9 +1595,8 @@ function formatCurrency(amount) {
 // Función auxiliar única para calcular saldo real de Cuenta NeuroTEA
 function calcularSaldoCuentaNeuroTEA(fecha) {
     const daySessions = sessions[fecha] || [];
-
-    // ⭐ AGREGAR ESTA LÍNEA:
     const dayPackages = dailyPackagePurchases[fecha] || [];
+    const dayGroupSessions = groupSessions[fecha] || [];
 
     let saldoTotal = 0;
 
@@ -464,9 +1605,14 @@ function calcularSaldoCuentaNeuroTEA(fecha) {
         saldoTotal += session.transferToNeurotea;
     });
 
-    // ⭐ AGREGAR: Sumar transferencias de paquetes
-    dayPackages.forEach(package => {
-        saldoTotal += package.transferToNeurotea;
+    // Sumar transferencias de paquetes
+    dayPackages.forEach(pkg => {
+        saldoTotal += pkg.transferToNeurotea;
+    });
+
+    // Sumar transferencias de sesiones grupales
+    dayGroupSessions.forEach(gs => {
+        saldoTotal += gs.transferToNeurotea || 0;
     });
 
     // Considerar confirmaciones de pago que afectan la cuenta NeuroTEA
@@ -496,15 +1642,17 @@ function calcularSaldoCuentaNeuroTEA(fecha) {
 function calcularSaldoCajaReal(fecha) {
     const daySessions = sessions[fecha] || [];
     const dayPackages = dailyPackagePurchases[fecha] || [];
+    const dayGroupSessions = groupSessions[fecha] || [];
     const dayEgresos = egresos[fecha] || [];
 
     // 1. SALDO INICIAL del día
     const saldoInicial = getInitialBalance(fecha) || 0;
 
-    // 2. EFECTIVO INGRESADO (sesiones + paquetes)
+    // 2. EFECTIVO INGRESADO (sesiones + paquetes + grupales)
     const efectivoSesiones = daySessions.reduce((sum, s) => sum + (s.cashToNeurotea || 0), 0);
     const efectivoPaquetes = dayPackages.reduce((sum, p) => sum + (p.cashToNeurotea || 0), 0);
-    const totalEfectivoIngresado = efectivoSesiones + efectivoPaquetes;
+    const efectivoGrupales = dayGroupSessions.reduce((sum, gs) => sum + (gs.cashToNeurotea || 0), 0);
+    const totalEfectivoIngresado = efectivoSesiones + efectivoPaquetes + efectivoGrupales;
 
     // 3. EGRESOS (adelantos + gastos NeuroTEA)
     const totalEgresos = dayEgresos.reduce((sum, e) => sum + (e.monto || 0), 0);
@@ -670,7 +1818,52 @@ async function saveToStorageAsync() {
         if (transferStatesData.length > 0) {
             await saveToIndexedDB('transferConfirmationStates', transferStatesData);
         }
-        
+
+        // ===========================
+        // GUARDAR DATOS - SISTEMA DE SESIONES GRUPALES
+        // ===========================
+
+        // Guardar configuración de grupos
+        const groupTherapyData = Object.values(groupTherapy);
+        if (groupTherapyData.length > 0) {
+            await saveToIndexedDB('groupTherapy', groupTherapyData);
+        }
+
+        // Guardar sesiones grupales - CON LIMPIEZA SELECTIVA
+        const groupSessionsData = [];
+        const fechasConGrupales = Object.keys(groupSessions);
+
+        for (const fecha of fechasConGrupales) {
+            // Limpiar sesiones grupales de esa fecha antes de guardar
+            await clearGroupSessionsByDate(fecha);
+
+            groupSessions[fecha].forEach(session => {
+                groupSessionsData.push({
+                    ...session,
+                    fecha: fecha
+                });
+            });
+        }
+
+        if (groupSessionsData.length > 0) {
+            await saveToIndexedDB('groupSessions', groupSessionsData);
+        }
+
+        // Guardar historial de grupos
+        const groupHistoryData = [];
+        Object.keys(groupTherapyHistory).forEach(groupId => {
+            groupTherapyHistory[groupId].forEach((entry, index) => {
+                groupHistoryData.push({
+                    id: `${groupId}_${index}_${entry.timestamp}`,
+                    groupId: groupId,
+                    ...entry
+                });
+            });
+        });
+        if (groupHistoryData.length > 0) {
+            await saveToIndexedDB('groupTherapyHistory', groupHistoryData);
+        }
+
     } catch (error) {
         console.error('Error saving to IndexedDB:', error);
         // Fallback a localStorage en caso de error
@@ -684,6 +1877,10 @@ async function saveToStorageAsync() {
         // Nuevas estructuras - Sistema de créditos y paquetes
         localStorage.setItem('neurotea_patientCredits', JSON.stringify(patientCredits));
         localStorage.setItem('neurotea_dailyPackagePurchases', JSON.stringify(dailyPackagePurchases));
+        // Nuevas estructuras - Sistema de sesiones grupales
+        localStorage.setItem('neurotea_groupTherapy', JSON.stringify(groupTherapy));
+        localStorage.setItem('neurotea_groupSessions', JSON.stringify(groupSessions));
+        localStorage.setItem('neurotea_groupTherapyHistory', JSON.stringify(groupTherapyHistory));
     }
 }
 
@@ -818,7 +2015,59 @@ async function loadFromStorage() {
             console.log('No previous transfer states found');
             transferConfirmationStates = {};
         }
-        
+
+        // ===========================
+        // CARGAR DATOS - SISTEMA DE SESIONES GRUPALES
+        // ===========================
+
+        // Cargar configuración de grupos
+        try {
+            const groupTherapyData = await loadFromIndexedDB('groupTherapy');
+            groupTherapy = {};
+            groupTherapyData.forEach(group => {
+                groupTherapy[group.id] = group;
+            });
+            console.log('✅ Grupos cargados:', Object.keys(groupTherapy).length);
+        } catch (error) {
+            console.log('No previous group therapy data found');
+            groupTherapy = {};
+        }
+
+        // Cargar sesiones grupales
+        try {
+            const groupSessionsData = await loadFromIndexedDB('groupSessions');
+            groupSessions = {};
+            groupSessionsData.forEach(session => {
+                const fecha = session.fecha;
+                if (!groupSessions[fecha]) {
+                    groupSessions[fecha] = [];
+                }
+                const { fecha: _, ...sessionWithoutFecha } = session;
+                groupSessions[fecha].push(sessionWithoutFecha);
+            });
+            console.log('✅ Sesiones grupales cargadas:', groupSessionsData.length);
+        } catch (error) {
+            console.log('No previous group sessions found');
+            groupSessions = {};
+        }
+
+        // Cargar historial de grupos
+        try {
+            const groupHistoryData = await loadFromIndexedDB('groupTherapyHistory');
+            groupTherapyHistory = {};
+            groupHistoryData.forEach(entry => {
+                const groupId = entry.groupId;
+                if (!groupTherapyHistory[groupId]) {
+                    groupTherapyHistory[groupId] = [];
+                }
+                const { id, groupId: _, ...entryWithoutMeta } = entry;
+                groupTherapyHistory[groupId].push(entryWithoutMeta);
+            });
+        } catch (error) {
+            console.log('No previous group history found');
+            groupTherapyHistory = {};
+        }
+
         // Limpiar registros antiguos
         await clearOldRecords();
         
@@ -835,12 +2084,19 @@ async function loadFromStorage() {
         // Nuevas estructuras - Sistema de créditos y paquetes
         patientCredits = JSON.parse(localStorage.getItem('neurotea_patientCredits') || '{}');
         dailyPackagePurchases = JSON.parse(localStorage.getItem('neurotea_dailyPackagePurchases') || '{}');
-        
+        // Nuevas estructuras - Sistema de sesiones grupales
+        groupTherapy = JSON.parse(localStorage.getItem('neurotea_groupTherapy') || '{}');
+        groupSessions = JSON.parse(localStorage.getItem('neurotea_groupSessions') || '{}');
+        groupTherapyHistory = JSON.parse(localStorage.getItem('neurotea_groupTherapyHistory') || '{}');
+
         limpiarRegistrosAntiguos();
     }
-    
+
     // Validar integridad de paquetes después de cargar
     validatePackageIntegrity();
+
+    // Validar integridad de grupos después de cargar
+    validateGroupTherapyIntegrity();
     
     // MIGRACIÓN: Limpiar datos corruptos del historial de saldos
     migrarHistorialSaldos();
@@ -886,6 +2142,31 @@ function limpiarRegistrosAntiguos() {
     Object.keys(historialSaldos).forEach(fecha => {
         if (fecha < fechaLimiteStr) {
             delete historialSaldos[fecha];
+        }
+    });
+
+    // Limpiar sesiones grupales antiguas (mantener solo últimos 30 días)
+    Object.keys(groupSessions).forEach(fecha => {
+        if (fecha < fechaLimiteStr) {
+            delete groupSessions[fecha];
+        }
+    });
+
+    // Limpiar historial de cambios en grupos antiguo
+    Object.keys(groupTherapyHistory).forEach(groupId => {
+        if (Array.isArray(groupTherapyHistory[groupId])) {
+            groupTherapyHistory[groupId] = groupTherapyHistory[groupId].filter(entry => {
+                if (entry.timestamp) {
+                    const entryDate = entry.timestamp.split('T')[0];
+                    return entryDate >= fechaLimiteStr;
+                }
+                return true;
+            });
+
+            // Si no quedan entradas, eliminar el grupo del historial
+            if (groupTherapyHistory[groupId].length === 0) {
+                delete groupTherapyHistory[groupId];
+            }
         }
     });
 
@@ -1617,16 +2898,19 @@ function toggleTherapistSelect() {
 function calculateTherapistStatus(therapist, fecha) {
     const daySessions = sessions[fecha] || [];
     const dayEgresos = egresos[fecha] || [];
-    
-    // Incluir paquetes diarios
     const dayPackages = dailyPackagePurchases[fecha] || [];
-    
+    const dayGroupSessions = groupSessions[fecha] || [];
+
     // Calcular totales para esta terapeuta
     const therapistSessions = daySessions.filter(s => s.therapist === therapist);
     const therapistPackages = dayPackages.filter(p => p.therapist === therapist);
-    
+    // Sesiones grupales donde participó esta terapeuta
+    const therapistGroupSessions = dayGroupSessions.filter(gs =>
+        gs.therapists && gs.therapists.includes(therapist)
+    );
+
     // Verificar si no hay datos
-    if (therapistSessions.length === 0 && therapistPackages.length === 0) {
+    if (therapistSessions.length === 0 && therapistPackages.length === 0 && therapistGroupSessions.length === 0) {
         return {
             ingresoTotal: 0,
             aporteNeurotea: 0,
@@ -1636,28 +2920,38 @@ function calculateTherapistStatus(therapist, fecha) {
             neuroteaLeDebe: 0,
             terapeutaDebe: 0,
             estado: 'SALDADO',
-            colorClass: 'badge-secondary'
+            colorClass: 'badge-secondary',
+            hasGroupSessions: false,
+            groupSessionsCount: 0
         };
     }
-    
-    // CALCULAR: Ingresos (sesiones + paquetes)
+
+    // CALCULAR: Ingresos (sesiones + paquetes + grupales)
     const sessionIncome = therapistSessions.filter(s => !s.creditUsed).reduce((sum, s) => sum + s.sessionValue, 0);
     const packageIncome = therapistPackages.reduce((sum, p) => sum + p.sessionValue, 0);
-    const ingresoTotal = sessionIncome + packageIncome;
-    
+    // Para grupales, cada terapeuta ve el total del grupo pero solo recibe su parte proporcional
+    const groupIncome = therapistGroupSessions.reduce((sum, gs) => sum + gs.totalValue, 0);
+    const ingresoTotal = sessionIncome + packageIncome + groupIncome;
+
     // CALCULAR: Aportes a NeuroTEA
     const sessionAporte = therapistSessions.filter(s => !s.creditUsed).reduce((sum, s) => sum + s.neuroteaContribution, 0);
     const packageAporte = therapistPackages.reduce((sum, p) => sum + (p.neuroteaContribution || 0), 0);
-    const aporteNeurotea = sessionAporte + packageAporte;
-    
+    // Para grupales, el aporte proporcional de cada terapeuta
+    const groupAporte = therapistGroupSessions.reduce((sum, gs) =>
+        sum + Math.round(gs.neuroteaContribution / gs.therapistCount), 0);
+    const aporteNeurotea = sessionAporte + packageAporte + groupAporte;
+
     // CALCULAR: Honorarios
     const sessionHonorarios = therapistSessions.filter(s => !s.creditUsed).reduce((sum, s) => sum + s.therapistFee, 0);
     const packageHonorarios = packageIncome - packageAporte;
-    const honorarios = sessionHonorarios + packageHonorarios;
-    
+    // Para grupales, cada terapeuta recibe su parte proporcional
+    const groupHonorarios = therapistGroupSessions.reduce((sum, gs) => sum + gs.feePerTherapist, 0);
+    const honorarios = sessionHonorarios + packageHonorarios + groupHonorarios;
+
     // CALCULAR: Transferencias
     const sessionTransfer = therapistSessions.reduce((sum, s) => sum + s.transferToTherapist, 0);
     const packageTransfer = therapistPackages.reduce((sum, p) => sum + p.transferToTherapist, 0);
+    // Sesiones grupales no tienen transferencia directa a terapeuta
     const transferenciaATerapeuta = sessionTransfer + packageTransfer;
     
     // CALCULAR: Adelantos recibidos
@@ -1741,7 +3035,11 @@ function calculateTherapistStatus(therapist, fecha) {
         valorTotalSesiones,
         aporteNeuroTEA,
         // ✅ NUEVO: Información de confirmación y vueltos
-        confirmacionInfo
+        confirmacionInfo,
+        // ✅ NUEVO: Flags para sesiones grupales
+        hasGroupSessions: therapistGroupSessions.length > 0,
+        groupSessionsCount: therapistGroupSessions.length,
+        groupHonorarios: groupHonorarios || 0
     };
 }
 
@@ -2017,10 +3315,12 @@ function updateDailySessionsList(fecha) {
         console.log("✅ DEBUG: Container encontrado:", container);
         
         const daySessions = sessions[fecha] || [];
+        const dayGroupSessions = groupSessions[fecha] || [];
         console.log("🔍 DEBUG: Sessions para fecha", fecha, ":", daySessions);
-        console.log("🔍 DEBUG: Cantidad de sesiones:", daySessions.length);
-        
-        if (daySessions.length === 0) {
+        console.log("🔍 DEBUG: Group Sessions para fecha", fecha, ":", dayGroupSessions);
+        console.log("🔍 DEBUG: Cantidad de sesiones:", daySessions.length, "grupales:", dayGroupSessions.length);
+
+        if (daySessions.length === 0 && dayGroupSessions.length === 0) {
             console.log("⚠️ DEBUG: No hay sesiones para mostrar");
             container.innerHTML = '<p class="text-gray-500 text-center py-4">No hay sesiones registradas para este día</p>';
             return;
@@ -2028,16 +3328,17 @@ function updateDailySessionsList(fecha) {
     
     console.log("🔍 DEBUG: Procesando", daySessions.length, "sesiones...");
     
-    // Agrupar sesiones por terapeuta y tipo (normal vs crédito)
+    // Agrupar sesiones por terapeuta y tipo (normal vs crédito vs grupal)
     const sessionsByTherapist = {};
     daySessions.forEach(session => {
         if (!sessionsByTherapist[session.therapist]) {
             sessionsByTherapist[session.therapist] = {
                 normal: [],
-                credits: []
+                credits: [],
+                group: []
             };
         }
-        
+
         // Separar sesiones normales de sesiones con crédito
         if (session.creditUsed === true) {
             sessionsByTherapist[session.therapist].credits.push(session);
@@ -2045,12 +3346,29 @@ function updateDailySessionsList(fecha) {
             sessionsByTherapist[session.therapist].normal.push(session);
         }
     });
+
+    // Agregar sesiones grupales - cada terapeuta participante ve la sesión
+    dayGroupSessions.forEach(groupSession => {
+        if (groupSession.therapists && Array.isArray(groupSession.therapists)) {
+            groupSession.therapists.forEach(therapist => {
+                if (!sessionsByTherapist[therapist]) {
+                    sessionsByTherapist[therapist] = {
+                        normal: [],
+                        credits: [],
+                        group: []
+                    };
+                }
+                sessionsByTherapist[therapist].group.push(groupSession);
+            });
+        }
+    });
     
     // Generar HTML agrupado por terapeuta con secciones separadas
     const therapistGroups = Object.keys(sessionsByTherapist).sort().map(therapist => {
         const normalSessions = sessionsByTherapist[therapist].normal;
         const creditSessions = sessionsByTherapist[therapist].credits;
-        
+        const groupSessionsForTherapist = sessionsByTherapist[therapist].group || [];
+
         let html = '';
         
         // SECCIÓN NORMAL (azul) - solo si hay sesiones normales
@@ -2140,7 +3458,70 @@ function updateDailySessionsList(fecha) {
                 </div>
             `;
         }
-        
+
+        // SECCIÓN GRUPALES (verde) - solo si hay sesiones grupales
+        if (groupSessionsForTherapist.length > 0) {
+            const groupCount = groupSessionsForTherapist.length;
+            const groupTotalHonorarios = groupSessionsForTherapist.reduce((sum, gs) => sum + gs.feePerTherapist, 0);
+
+            const groupSessionsHTML = groupSessionsForTherapist.map(gs => {
+                const presentChildren = gs.attendance ? gs.attendance.filter(a => a.present).length : 0;
+                const totalChildren = gs.attendance ? gs.attendance.length : 0;
+                const groupConfig = groupTherapy[gs.groupId];
+                const groupName = groupConfig ? groupConfig.name : 'Grupo Desconocido';
+                const therapistCount = gs.therapistCount || 1;
+
+                // Lista de niños presentes
+                const presentChildrenNames = gs.attendance
+                    ? gs.attendance.filter(a => a.present).map(a => a.childName).join(', ')
+                    : '';
+
+                return `
+                    <div class="p-3 border-l-4 border-green-400 bg-green-50 dark:bg-green-900 ml-4 mb-2">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h5 class="font-semibold text-green-800 dark:text-green-200">${groupName}</h5>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-200 text-green-800 dark:bg-green-700 dark:text-green-200">
+                                    GRUPAL ÷${therapistCount}
+                                </span>
+                            </div>
+                            <button onclick="deleteGroupSession('${fecha}', '${gs.id}')" class="text-red-500 hover:text-red-700 p-1">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <div class="text-sm text-green-700 dark:text-green-300 mb-2">
+                            <span class="font-medium">Presentes: ${presentChildren}/${totalChildren}</span>
+                            ${presentChildrenNames ? ` - ${presentChildrenNames}` : ''}
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-sm text-green-700 dark:text-green-300">
+                            <div>Valor Total: ${formatCurrency(gs.totalValue)}</div>
+                            <div>Aporte NeuroTEA: ${formatCurrency(gs.neuroteaContribution)}</div>
+                            <div class="font-bold">Mi Parte: ${formatCurrency(gs.feePerTherapist)}</div>
+                            <div>Terapeutas: ${therapistCount}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            html += `
+                <div class="mb-4 border rounded-md bg-white dark:bg-gray-800 overflow-hidden">
+                    <div class="bg-green-100 dark:bg-green-800 p-4 cursor-pointer hover:bg-green-200 dark:hover:bg-green-700 transition-colors"
+                         onclick="toggleTherapistGroup('${therapist.replace(/'/g, "\\'")}', 'group')">
+                        <div class="flex justify-between items-center">
+                            <h4 class="font-semibold text-green-800 dark:text-green-200">${therapist}</h4>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm text-green-600 dark:text-green-300">${groupCount} sesión${groupCount !== 1 ? 'es' : ''} grupal${groupCount !== 1 ? 'es' : ''} - ${formatCurrency(groupTotalHonorarios)}</span>
+                                <i data-lucide="chevron-down" class="w-4 h-4 text-green-600 dark:text-green-300 transform transition-transform" id="chevron-${therapist.replace(/[^a-zA-Z0-9]/g, '_')}_group"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hidden p-4" id="sessions-${therapist.replace(/[^a-zA-Z0-9]/g, '_')}_group">
+                        ${groupSessionsHTML}
+                    </div>
+                </div>
+            `;
+        }
+
         return html;
     }).join('');
     
@@ -2206,6 +3587,25 @@ function calculateCreditUsage(session) {
     }
 }
 
+// Función para alternar el formulario de sesión grupal
+function toggleGroupSessionForm() {
+    const content = document.getElementById('group-session-form-content');
+    const chevron = document.getElementById('group-form-chevron');
+
+    if (content && chevron) {
+        if (content.classList.contains('hidden')) {
+            content.classList.remove('hidden');
+            chevron.classList.add('rotate-180');
+            // Poblar el select de grupos al abrir
+            populateGroupSelect();
+            populateGroupTherapistSelect();
+        } else {
+            content.classList.add('hidden');
+            chevron.classList.remove('rotate-180');
+        }
+    }
+}
+
 // Función actualizada para alternar la visibilidad de los grupos de terapeutas
 function toggleTherapistGroup(therapistName, type = 'normal') {
     const sanitizedName = therapistName.replace(/[^a-zA-Z0-9]/g, '_');
@@ -2231,34 +3631,36 @@ function updateDashboard(fecha) {
         if (typeof sessions === 'undefined') sessions = {};
         if (typeof egresos === 'undefined') egresos = {};
         if (typeof dailyPackagePurchases === 'undefined') dailyPackagePurchases = {};
-        
+        if (typeof groupSessions === 'undefined') groupSessions = {};
+
         const daySessions = sessions[fecha] || [];
         const dayEgresos = egresos[fecha] || [];
-        
-        // ⭐ AGREGAR ESTA LÍNEA:
         const dayPackages = dailyPackagePurchases[fecha] || [];
-        
-        console.log("🔍 DEBUG updateDashboard: Datos cargados - Sessions:", daySessions.length, "Egresos:", dayEgresos.length, "Packages:", dayPackages.length);
-        
-        // ⭐ REEMPLAZAR ESTOS CÁLCULOS:
-        
-        // Calcular totales DEL DÍA incluyendo paquetes
+        const dayGroupSessions = groupSessions[fecha] || [];
+
+        console.log("🔍 DEBUG updateDashboard: Datos cargados - Sessions:", daySessions.length, "Egresos:", dayEgresos.length, "Packages:", dayPackages.length, "GroupSessions:", dayGroupSessions.length);
+
+        // Calcular totales DEL DÍA incluyendo paquetes y sesiones grupales
         const sessionIncome = daySessions.filter(s => !s.creditUsed).reduce((sum, s) => sum + (s.sessionValue || 0), 0);
         const packageIncome = dayPackages.reduce((sum, p) => sum + (p.sessionValue || 0), 0);
-        const totalIngresos = sessionIncome + packageIncome;
-        
+        const groupIncome = dayGroupSessions.reduce((sum, gs) => sum + (gs.totalValue || 0), 0);
+        const totalIngresos = sessionIncome + packageIncome + groupIncome;
+
         const sessionAporte = daySessions.filter(s => !s.creditUsed).reduce((sum, s) => sum + (s.neuroteaContribution || 0), 0);
         const packageAporte = dayPackages.reduce((sum, p) => sum + (p.neuroteaContribution || 0), 0);
-        const totalAporteNeurotea = sessionAporte + packageAporte;
-        
+        const groupAporte = dayGroupSessions.reduce((sum, gs) => sum + (gs.neuroteaContribution || 0), 0);
+        const totalAporteNeurotea = sessionAporte + packageAporte + groupAporte;
+
         const sessionEfectivo = daySessions.reduce((sum, s) => sum + (s.cashToNeurotea || 0), 0);
         const packageEfectivo = dayPackages.reduce((sum, p) => sum + (p.cashToNeurotea || 0), 0);
-        const totalEfectivo = sessionEfectivo + packageEfectivo;
-        
+        const groupEfectivo = dayGroupSessions.reduce((sum, gs) => sum + (gs.cashToNeurotea || 0), 0);
+        const totalEfectivo = sessionEfectivo + packageEfectivo + groupEfectivo;
+
         const sessionTransfNeurotea = daySessions.reduce((sum, s) => sum + (s.transferToNeurotea || 0), 0);
         const packageTransfNeurotea = dayPackages.reduce((sum, p) => sum + (p.transferToNeurotea || 0), 0);
-        const totalTransfNeurotea = sessionTransfNeurotea + packageTransfNeurotea;
-        
+        const groupTransfNeurotea = dayGroupSessions.reduce((sum, gs) => sum + (gs.transferToNeurotea || 0), 0);
+        const totalTransfNeurotea = sessionTransfNeurotea + packageTransfNeurotea + groupTransfNeurotea;
+
         const totalEgresos = dayEgresos.reduce((sum, e) => sum + (e.monto || 0), 0);
         
         console.log("✅ DEBUG updateDashboard: Cálculos completados exitosamente");
@@ -2374,7 +3776,27 @@ function updateTransferDetails(fecha) {
             });
         }
     });
-    
+
+    // NUEVO: Procesar sesiones grupales
+    const dayGroupSessions = groupSessions[fecha] || [];
+    dayGroupSessions.forEach(gs => {
+        if (gs.transferToNeurotea > 0) {
+            const groupConfig = groupTherapy[gs.groupId];
+            const groupName = groupConfig ? groupConfig.name : 'Grupo';
+            const presentCount = gs.attendance ? gs.attendance.filter(a => a.present).length : 0;
+
+            transfers.push({
+                id: `group_${gs.id}_neurotea`,
+                tipo: 'A NeuroTEA (Grupal)',
+                destinatario: 'NeuroTEA',
+                monto: gs.transferToNeurotea,
+                concepto: `Sesión grupal "${groupName}" (${presentCount} niños, ${gs.therapistCount} terapeutas)`,
+                patientName: `Grupo: ${groupName}`,
+                isGroupSession: true
+            });
+        }
+    });
+
     if (transfers.length === 0) {
         container.innerHTML = '<p class="text-gray-500 text-center py-4">No hay transferencias registradas para este día</p>';
         return;
@@ -2397,9 +3819,11 @@ function updateTransferDetails(fecha) {
         
         const transfersHTML = destinationTransfers.map(transfer => {
             const isNeuroTEA = destinatario === 'NeuroTEA';
-            const borderColor = isNeuroTEA ? 'border-blue-300' : 'border-purple-300';
-            const badgeColor = transfer.tipo === 'A NeuroTEA' ? 'bg-blue-100 text-blue-800' : 
-                              transfer.tipo === 'Vuelto de Terapeuta' ? 'bg-orange-100 text-orange-800' : 
+            const isGroupSession = transfer.isGroupSession || false;
+            const borderColor = isGroupSession ? 'border-green-400' : (isNeuroTEA ? 'border-blue-300' : 'border-purple-300');
+            const badgeColor = transfer.tipo === 'A NeuroTEA (Grupal)' ? 'bg-green-100 text-green-800' :
+                              transfer.tipo === 'A NeuroTEA' ? 'bg-blue-100 text-blue-800' :
+                              transfer.tipo === 'Vuelto de Terapeuta' ? 'bg-orange-100 text-orange-800' :
                               'bg-purple-100 text-purple-800';
             
             // NUEVO: Agregar botón de confirmación SOLO para NeuroTEA
@@ -6402,17 +7826,22 @@ function detectAvailableData() {
         sessions: typeof sessions !== 'undefined' && sessions !== null,
         egresos: typeof egresos !== 'undefined' && egresos !== null,
         therapists: typeof therapists !== 'undefined' && therapists !== null,
-        
+
         // Detectar funcionalidades de fases específicas
         credits: typeof creditPurchases !== 'undefined' && creditPurchases !== null,
         packages: typeof dailyPackagePurchases !== 'undefined' && dailyPackagePurchases !== null,
         confirmaciones: typeof confirmaciones !== 'undefined' && confirmaciones !== null,
-        vueltos: typeof transferConfirmationStates !== 'undefined' && transferConfirmationStates !== null
+        vueltos: typeof transferConfirmationStates !== 'undefined' && transferConfirmationStates !== null,
+
+        // Detectar funcionalidad de sesiones grupales
+        groupTherapy: typeof groupTherapy !== 'undefined' && groupTherapy !== null,
+        groupSessions: typeof groupSessions !== 'undefined' && groupSessions !== null,
+        groupTherapyHistory: typeof groupTherapyHistory !== 'undefined' && groupTherapyHistory !== null
     };
-    
+
     // Guardar información detectada
     window.detectedFeatures = available;
-    
+
     return available;
 }
 
@@ -6431,17 +7860,22 @@ function updateSystemInfo() {
     if (available.packages) info += `<li>✅ Paquetes de Sesiones (Fase 2)</li>`;
     if (available.confirmaciones) info += `<li>✅ Confirmaciones (Fase 3)</li>`;
     if (available.vueltos) info += `<li>✅ Sistema de Vueltos (Fase 4+5)</li>`;
+    if (available.groupTherapy) info += `<li>✅ Sesiones Grupales</li>`;
     info += '</ul></div>';
-    
+
     // Estadísticas de datos
     const totalSessions = Object.values(sessions || {}).flat().length;
     const totalDays = Object.keys(sessions || {}).length;
     const totalTherapists = (therapists || []).length;
-    
+    const totalGroups = Object.keys(groupTherapy || {}).filter(k => groupTherapy[k].status === 'active').length;
+    const totalGroupSessions = Object.values(groupSessions || {}).flat().length;
+
     info += '<div><strong>Estadísticas:</strong><ul class="mt-1 space-y-1">';
     info += `<li>📊 Días con datos: ${totalDays}</li>`;
     info += `<li>👥 Terapeutas: ${totalTherapists}</li>`;
     info += `<li>📝 Sesiones totales: ${totalSessions}</li>`;
+    if (totalGroups > 0) info += `<li>👨‍👩‍👧‍👦 Grupos activos: ${totalGroups}</li>`;
+    if (totalGroupSessions > 0) info += `<li>🤝 Sesiones grupales: ${totalGroupSessions}</li>`;
     info += '</ul></div>';
     
     info += '</div>';
@@ -6804,7 +8238,20 @@ function generateFullBackupJSON(available) {
     if (available.vueltos && typeof transferConfirmationStates !== 'undefined') {
         backupData.transferConfirmationStates = transferConfirmationStates;
     }
-    
+
+    // Incluir datos de sesiones grupales
+    if (available.groupTherapy && typeof groupTherapy !== 'undefined') {
+        backupData.groupTherapy = groupTherapy;
+    }
+
+    if (available.groupSessions && typeof groupSessions !== 'undefined') {
+        backupData.groupSessions = groupSessions;
+    }
+
+    if (available.groupTherapyHistory && typeof groupTherapyHistory !== 'undefined') {
+        backupData.groupTherapyHistory = groupTherapyHistory;
+    }
+
     return backupData;
 }
 
@@ -6891,7 +8338,20 @@ function processFullBackupRestore(backupData) {
         if (backupData.transferConfirmationStates && typeof transferConfirmationStates !== 'undefined') {
             transferConfirmationStates = backupData.transferConfirmationStates;
         }
-        
+
+        // Restaurar datos de sesiones grupales
+        if (backupData.groupTherapy && typeof groupTherapy !== 'undefined') {
+            groupTherapy = backupData.groupTherapy;
+        }
+
+        if (backupData.groupSessions && typeof groupSessions !== 'undefined') {
+            groupSessions = backupData.groupSessions;
+        }
+
+        if (backupData.groupTherapyHistory && typeof groupTherapyHistory !== 'undefined') {
+            groupTherapyHistory = backupData.groupTherapyHistory;
+        }
+
         // Guardar datos restaurados
         saveToStorageAsync();
         

@@ -501,6 +501,10 @@
                     <span>Paquetes / Créditos</span>
                 </button>
                 <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(7)">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                    <span>Gestionar Grupos</span>
+                </button>
+                <button class="tab-button px-4 py-2 rounded-md hover:bg-purple-700 transition-colors flex items-center space-x-2" onclick="switchTab(8)">
                     <i data-lucide="settings" class="w-4 h-4"></i>
                     <span>Administración</span>
                 </button>
@@ -1216,7 +1220,7 @@
     <!-- Modal de Registrar Sesión Grupal -->
     <div id="group-session-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
         <div class="fixed inset-0 flex items-center justify-center p-4">
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
                 <div class="flex justify-between items-center p-6 border-b dark:border-gray-700 bg-green-50 dark:bg-green-900/20">
                     <h3 class="text-xl font-bold text-green-800 dark:text-green-200 flex items-center">
                         <i data-lucide="users" class="w-6 h-6 mr-2"></i>
@@ -1236,62 +1240,68 @@
                         </select>
                     </div>
 
-                    <!-- Asistencia de Niños -->
-                    <div id="group-attendance-section" class="mb-4 hidden">
-                        <label class="block text-sm font-medium mb-2">Asistencia (marcar presentes)</label>
-                        <div id="group-attendance-list" class="space-y-2 border rounded-lg p-3 bg-gray-50 dark:bg-gray-700">
-                            <!-- Se llena dinámicamente -->
-                        </div>
-                    </div>
-
-                    <!-- Terapeutas -->
+                    <!-- Terapeutas de la Sesión -->
                     <div id="group-therapists-section" class="mb-4 hidden">
-                        <label class="block text-sm font-medium mb-2">Terapeutas de la Sesión</label>
-                        <div id="group-therapists-list" class="space-y-2 border rounded-lg p-3 bg-gray-50 dark:bg-gray-700">
+                        <label class="block text-sm font-medium mb-2">Terapeutas de la Sesión (seleccionar)</label>
+                        <div id="group-therapists-list" class="flex flex-wrap gap-2 border rounded-lg p-3 bg-gray-50 dark:bg-gray-700">
                             <!-- Se llena dinámicamente -->
                         </div>
                     </div>
 
-                    <!-- Valores Calculados -->
+                    <!-- Asistencia y Pagos por Niño -->
+                    <div id="group-attendance-section" class="mb-4 hidden">
+                        <label class="block text-sm font-medium mb-2">Asistencia y Forma de Pago por Niño</label>
+                        <p class="text-xs text-gray-500 mb-3">Marque los niños presentes e ingrese cómo pagó cada uno</p>
+                        <div id="group-attendance-list" class="space-y-3 border rounded-lg p-3 bg-gray-50 dark:bg-gray-700 max-h-64 overflow-y-auto">
+                            <!-- Se llena dinámicamente con formato expandido -->
+                        </div>
+                    </div>
+
+                    <!-- Resumen Consolidado -->
                     <div id="group-values-section" class="mb-4 hidden">
                         <div class="border rounded-lg p-4 bg-green-50 dark:bg-green-900/20">
-                            <h4 class="font-semibold mb-3 text-green-700 dark:text-green-300">Resumen de Valores</h4>
-                            <div class="grid grid-cols-2 gap-3 text-sm">
+                            <h4 class="font-semibold mb-3 text-green-700 dark:text-green-300">Resumen Consolidado</h4>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
                                 <div>
-                                    <span class="text-gray-600 dark:text-gray-400">Total Sesión:</span>
-                                    <span id="group-total-value" class="font-bold ml-2">0 Gs</span>
+                                    <span class="text-gray-600 dark:text-gray-400 block">Niños presentes:</span>
+                                    <span id="group-children-count" class="font-bold text-lg">0</span>
                                 </div>
                                 <div>
-                                    <span class="text-gray-600 dark:text-gray-400">Aporte NeuroTEA:</span>
-                                    <span id="group-neurotea-value" class="font-bold ml-2 text-blue-600">0 Gs</span>
+                                    <span class="text-gray-600 dark:text-gray-400 block">Total Sesión:</span>
+                                    <span id="group-total-value" class="font-bold text-lg">Gs 0</span>
                                 </div>
                                 <div>
-                                    <span class="text-gray-600 dark:text-gray-400">Honorarios por Terapeuta:</span>
-                                    <span id="group-therapist-fee" class="font-bold ml-2 text-purple-600">0 Gs</span>
+                                    <span class="text-gray-600 dark:text-gray-400 block">Aporte NeuroTEA:</span>
+                                    <span id="group-neurotea-value" class="font-bold text-lg text-blue-600">Gs 0</span>
                                 </div>
                                 <div>
-                                    <span class="text-gray-600 dark:text-gray-400">Niños presentes:</span>
-                                    <span id="group-children-count" class="font-bold ml-2">0</span>
+                                    <span class="text-gray-600 dark:text-gray-400 block">Honorarios/Terapeuta:</span>
+                                    <span id="group-therapist-fee" class="font-bold text-lg text-purple-600">Gs 0</span>
                                 </div>
                             </div>
-                        </div>
-                    </div>
 
-                    <!-- Forma de Pago -->
-                    <div id="group-payment-section" class="mb-4 hidden">
-                        <h4 class="font-semibold mb-3">Forma de Pago a NeuroTEA</h4>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium mb-1">Efectivo</label>
-                                <input type="number" id="group-cash-neurotea" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 campo-efectivo" placeholder="0" oninput="updateGroupPaymentTotals()">
+                            <!-- Desglose de Pagos Consolidados -->
+                            <div class="border-t dark:border-gray-600 pt-3 mt-3">
+                                <h5 class="text-sm font-medium mb-2">Desglose de Pagos:</h5>
+                                <div class="grid grid-cols-3 gap-3 text-sm">
+                                    <div class="bg-green-100 dark:bg-green-800/30 p-2 rounded">
+                                        <span class="text-green-700 dark:text-green-300 block text-xs">Efectivo (Caja)</span>
+                                        <span id="group-total-cash" class="font-bold">Gs 0</span>
+                                    </div>
+                                    <div class="bg-blue-100 dark:bg-blue-800/30 p-2 rounded">
+                                        <span class="text-blue-700 dark:text-blue-300 block text-xs">Transf. NeuroTEA</span>
+                                        <span id="group-total-transfer-neurotea" class="font-bold">Gs 0</span>
+                                    </div>
+                                    <div class="bg-purple-100 dark:bg-purple-800/30 p-2 rounded">
+                                        <span class="text-purple-700 dark:text-purple-300 block text-xs">Transf. Terapeutas</span>
+                                        <span id="group-total-transfer-therapist" class="font-bold">Gs 0</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-1">Transferencia</label>
-                                <input type="number" id="group-transfer-neurotea" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 campo-transferencia-neurotea" placeholder="0" oninput="updateGroupPaymentTotals()">
+
+                            <div id="group-payment-warning" class="hidden mt-3 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                                El total de pagos no coincide con el valor de la sesión
                             </div>
-                        </div>
-                        <div id="group-payment-warning" class="hidden mt-2 text-sm text-red-500">
-                            El total de pagos no coincide con el aporte a NeuroTEA
                         </div>
                     </div>
                 </div>
@@ -1446,6 +1456,55 @@
         </div>
     </div>
 
+    <!-- Vista de Gestionar Grupos -->
+    <div id="grupos-view" class="space-y-6" style="display: none;">
+        <h2 class="text-2xl font-bold mb-6 flex items-center">
+            <i data-lucide="users" class="w-6 h-6 mr-2"></i>
+            Gestión de Grupos de Terapia
+        </h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Crear Nuevo Grupo -->
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <h3 class="text-lg font-semibold mb-4 flex items-center text-green-700 dark:text-green-400">
+                    <i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i>
+                    Crear Nuevo Grupo
+                </h3>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Nombre del Grupo</label>
+                        <input type="text" id="new-group-name-tab" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" placeholder="Ej: Grupo Lunes Tarde">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">% Aporte NeuroTEA</label>
+                        <input type="number" id="new-group-percentage-tab" class="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600" value="30" min="0" max="100">
+                    </div>
+                    <button onclick="createGroupFromTab()" class="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-md flex items-center justify-center">
+                        <i data-lucide="plus" class="w-4 h-4 mr-2"></i>
+                        Crear Grupo
+                    </button>
+                </div>
+            </div>
+
+            <!-- Lista de Grupos -->
+            <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold flex items-center">
+                        <i data-lucide="list" class="w-5 h-5 mr-2"></i>
+                        Grupos Configurados
+                    </h3>
+                    <span id="grupos-counter" class="text-sm text-gray-500">0 grupos</span>
+                </div>
+
+                <div id="grupos-list-tab" class="space-y-4">
+                    <p class="text-gray-500 text-center py-8">No hay grupos configurados. Cree uno nuevo para comenzar.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- FIN de vista de gestión de grupos -->
+
     <!-- Vista de Administración -->
     <div id="administracion-view" class="space-y-6" style="display: none;">
         <h2 class="text-2xl font-bold mb-6 flex items-center">
@@ -1567,21 +1626,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Configuración de Grupos de Terapia -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mt-6">
-                <h3 class="text-lg font-semibold mb-4 flex items-center text-green-700 dark:text-green-400">
-                    <i data-lucide="users" class="w-5 h-5 mr-2"></i>
-                    Configuración de Grupos de Terapia
-                </h3>
-                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Configure los grupos para sesiones de terapia grupal. Defina los integrantes, valores por niño y porcentaje de aporte a NeuroTEA.
-                </p>
-                <button onclick="openGroupManagement()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-md flex items-center">
-                    <i data-lucide="settings" class="w-4 h-4 mr-2"></i>
-                    Administrar Grupos
-                </button>
             </div>
 
             <!-- Información del Sistema -->

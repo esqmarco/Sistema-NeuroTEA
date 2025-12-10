@@ -895,9 +895,16 @@ function deleteGroup(groupId) {
     addToGroupHistory(groupId, 'delete', {});
     logGroupOperation('group_delete', { groupId: groupId, groupName: group.name });
 
+    // Eliminar de memoria
     delete groupTherapy[groupId];
 
-    saveGroupTherapyToStorage();
+    // Eliminar de IndexedDB directamente
+    deleteFromIndexedDB('groupTherapy', groupId).then(() => {
+        console.log('✅ Grupo eliminado de IndexedDB:', groupId);
+    }).catch(err => {
+        console.error('❌ Error eliminando grupo de IndexedDB:', err);
+    });
+
     saveToStorageAsync(); // Guardar también las sesiones grupales actualizadas
     renderGroupList();
     renderGroupsListTab();

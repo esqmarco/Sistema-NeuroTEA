@@ -524,6 +524,18 @@ function deleteSingleEgresoFromIndexedDB(egresoId) {
  * @returns {string} ID del grupo creado
  */
 function createGroup() {
+    // Obtener valores del formulario
+    const nameInput = document.getElementById('new-group-name');
+    const percentageInput = document.getElementById('new-group-percentage');
+
+    const groupName = nameInput?.value?.trim() || '';
+    const neuroteaPercentage = parseInt(percentageInput?.value || 30);
+
+    if (!groupName) {
+        alert('Por favor ingrese un nombre para el grupo');
+        return null;
+    }
+
     // Calcular siguiente número de grupo
     const existingNumbers = Object.keys(groupTherapy)
         .map(id => parseInt(id.replace('grupo-', '')))
@@ -534,23 +546,33 @@ function createGroup() {
 
     groupTherapy[groupId] = {
         id: groupId,
-        name: `Grupo ${nextNumber}`,
+        name: groupName,
         children: [],
         totalMaxValue: 0,
+        neuroteaPercentage: neuroteaPercentage,
         createdAt: fechaActual,
         status: 'active'
     };
 
     // Registrar en historial
-    addToGroupHistory(groupId, 'create', {});
+    addToGroupHistory(groupId, 'create', { name: groupName, neuroteaPercentage });
 
     // Log de auditoría
     logGroupOperation('group_create', {
         groupId: groupId,
-        groupName: `Grupo ${nextNumber}`
+        groupName: groupName
     });
 
     saveGroupTherapyToStorage();
+
+    // Limpiar formulario
+    if (nameInput) nameInput.value = '';
+    if (percentageInput) percentageInput.value = '30';
+
+    // Actualizar lista
+    renderGroupList();
+
+    alert(`Grupo "${groupName}" creado exitosamente`);
     return groupId;
 }
 
@@ -938,18 +960,13 @@ function calculateGroupSessionValues() {
     const presentCount = presentChildren.length;
     const totalValue = presentChildren.reduce((sum, child) => sum + child.amount, 0);
 
-    // Obtener tipo de aporte
-    const contributionTypeRadio = document.querySelector('input[name="group-contribution"]:checked');
-    const contributionType = contributionTypeRadio ? contributionTypeRadio.value : '30';
+    // Obtener porcentaje de aporte del grupo (default 30%)
+    const group = groupTherapy[groupSessionTemp.groupId];
+    const percentage = group?.neuroteaPercentage || 30;
+    const contributionType = String(percentage);
 
     // Calcular aporte a NeuroTEA
-    let neuroteaContribution = 0;
-    if (contributionType === 'fixed') {
-        neuroteaContribution = parseNumber(document.getElementById('group-fixed-amount')?.value || 0);
-    } else {
-        const percentage = parseFloat(contributionType) || 30;
-        neuroteaContribution = Math.round(totalValue * (percentage / 100));
-    }
+    const neuroteaContribution = Math.round(totalValue * (percentage / 100));
 
     // Calcular honorarios
     const totalFee = Math.max(0, totalValue - neuroteaContribution);
@@ -990,7 +1007,7 @@ function calculateGroupSessionValues() {
  * Valida si se puede registrar la sesión grupal
  */
 function validateGroupSessionButton() {
-    const btn = document.getElementById('register-group-session-btn');
+    const btn = document.getElementById('register-group-btn');
     if (!btn) return;
 
     const hasGroup = groupSessionTemp.groupId !== null;
@@ -1029,8 +1046,8 @@ function registerGroupSession() {
     }
 
     // Obtener valores de pago
-    const cashToNeurotea = parseNumber(document.getElementById('group-cash')?.value || 0);
-    const transferToNeurotea = parseNumber(document.getElementById('group-transfer')?.value || 0);
+    const cashToNeurotea = parseNumber(document.getElementById('group-cash-neurotea')?.value || 0);
+    const transferToNeurotea = parseNumber(document.getElementById('group-transfer-neurotea')?.value || 0);
 
     if (cashToNeurotea + transferToNeurotea <= 0) {
         alert('Debe ingresar el desglose del pago');
@@ -1100,13 +1117,15 @@ function registerGroupSession() {
     });
 
     // Guardar en storage
-    saveToStorage();
+    saveToStorageAsync();
 
     // Limpiar formulario
     clearGroupSessionForm();
 
     // Actualizar todas las vistas
-    updateAllViews(fecha);
+    updateDashboard(fecha);
+    updateDailySessionsList(fecha);
+    updateTransferDetails(fecha);
 
     alert(`Sesión grupal de ${group.name} registrada exitosamente`);
     console.log('✅ Sesión grupal registrada:', groupSession);
@@ -1130,29 +1149,26 @@ function clearGroupSessionForm() {
     const therapistSelect = document.getElementById('group-therapist-select');
     if (therapistSelect) therapistSelect.value = '';
 
-    const groupCash = document.getElementById('group-cash');
+    const groupCash = document.getElementById('group-cash-neurotea');
     if (groupCash) groupCash.value = '';
 
-    const groupTransfer = document.getElementById('group-transfer');
+    const groupTransfer = document.getElementById('group-transfer-neurotea');
     if (groupTransfer) groupTransfer.value = '';
-
-    const groupFixed = document.getElementById('group-fixed-amount');
-    if (groupFixed) groupFixed.value = '';
-
-    // Resetear radio a 30%
-    const radio30 = document.getElementById('group-contribution-30');
-    if (radio30) radio30.checked = true;
 
     // Resetear displays
     renderGroupAttendanceList();
     renderGroupTherapistsList();
 
-    // Volver al modo de registro normal
-    const modoNormal = document.getElementById('modo-pago-dia');
-    if (modoNormal) {
-        modoNormal.checked = true;
-        togglePaymentMode();
-    }
+    // Ocultar secciones
+    const attendanceSection = document.getElementById('group-attendance-section');
+    const therapistsSection = document.getElementById('group-therapists-section');
+    const valuesSection = document.getElementById('group-values-section');
+    const paymentSection = document.getElementById('group-payment-section');
+
+    if (attendanceSection) attendanceSection.classList.add('hidden');
+    if (therapistsSection) therapistsSection.classList.add('hidden');
+    if (valuesSection) valuesSection.classList.add('hidden');
+    if (paymentSection) paymentSection.classList.add('hidden');
 }
 
 /**
@@ -1192,10 +1208,12 @@ async function deleteGroupSession(fecha, sessionId) {
     }
 
     // Guardar cambios
-    saveToStorage();
+    await saveToStorageAsync();
 
     // Actualizar vistas
-    updateAllViews(fecha);
+    updateDashboard(fecha);
+    updateDailySessionsList(fecha);
+    updateTransferDetails(fecha);
 
     console.log(`✅ Sesión grupal eliminada.`);
 }
@@ -1464,9 +1482,12 @@ function renderEditGroupChildrenList() {
 
     if (group.children.length === 0) {
         container.innerHTML = '<p class="text-gray-500 text-sm italic">No hay niños en el grupo</p>';
-        document.getElementById('edit-group-total').textContent = 'Gs 0';
         return;
     }
+
+    // Calcular total máximo del grupo
+    const totalMax = group.children.reduce((sum, child) => sum + child.amount, 0);
+    group.totalMaxValue = totalMax;
 
     container.innerHTML = group.children.map(child => `
         <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded mb-2">
@@ -1474,6 +1495,7 @@ function renderEditGroupChildrenList() {
                 <span class="font-medium">${child.name}</span>
             </div>
             <div class="flex items-center space-x-2">
+                <span class="text-sm text-gray-600 dark:text-gray-400 mr-2">${formatCurrency(child.amount)}</span>
                 <input type="number"
                        id="child-amount-${child.id}"
                        value="${child.amount}"
@@ -1487,7 +1509,13 @@ function renderEditGroupChildrenList() {
         </div>
     `).join('');
 
-    document.getElementById('edit-group-total').textContent = formatCurrency(group.totalMaxValue);
+    // Mostrar total del grupo
+    container.innerHTML += `
+        <div class="mt-3 pt-3 border-t dark:border-gray-600 flex justify-between items-center">
+            <span class="font-medium">Total Máximo del Grupo:</span>
+            <span class="font-bold text-lg">${formatCurrency(totalMax)}</span>
+        </div>
+    `;
 
     // Reinicializar iconos Lucide
     if (typeof lucide !== 'undefined') {
